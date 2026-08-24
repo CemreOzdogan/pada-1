@@ -473,7 +473,7 @@ internal sealed class MainForm : Form
                 }
             }
 
-            string folder = ResolveKeygenFolder(requestedFolder, variant);
+            string folder = ResolveKeygenFolder(requestedFolder, variant, engine);
             try
             {
                 Directory.CreateDirectory(folder);
@@ -757,7 +757,7 @@ internal sealed class MainForm : Form
     private static string FormatDuration(TimeSpan elapsed) =>
         elapsed.TotalSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + " s";
 
-    private static string ResolveKeygenFolder(string? requestedFolder, string variant)
+    private static string ResolveKeygenFolder(string? requestedFolder, string variant, string engine)
     {
         if (!string.IsNullOrWhiteSpace(requestedFolder))
         {
@@ -765,7 +765,7 @@ internal sealed class MainForm : Form
         }
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        return Path.Combine(FindRepoRoot(), "keys", $"{stamp}_{variant}");
+        return Path.Combine(FindRepoRoot(), "keys", $"{stamp}_{variant}_{engine}");
     }
 
     private static string ResolveCiphertextPath(string? requestedPath, string variant)
