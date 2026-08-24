@@ -68,7 +68,7 @@ internal sealed class MainForm : Form
     private readonly List<(TextBox Box, FieldSpec Spec)> _currentFields = [];
     private readonly BindingList<RunRow> _rows = [];
 
-    private sealed record RunRow(string Time, string Scheme, string Op, string Variant, bool Ok, string Summary, string RawJson);
+    private sealed record RunRow(string Time, string Scheme, string Op, string Variant, bool Ok, string Duration, string Summary, string RawJson);
 
     public MainForm()
     {
@@ -155,6 +155,7 @@ internal sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Op", DataPropertyName = nameof(RunRow.Op), Width = 80 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Variant", DataPropertyName = nameof(RunRow.Variant), Width = 90 });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "OK", DataPropertyName = nameof(RunRow.Ok), Width = 40 });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration", DataPropertyName = nameof(RunRow.Duration), Width = 80 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
         _grid.DataSource = _rows;
         _grid.SelectionChanged += (_, _) => OnGridSelectionChanged();
@@ -364,7 +365,8 @@ internal sealed class MainForm : Form
             summary = string.IsNullOrEmpty(rawJson) ? "(no output)" : rawJson;
         }
 
-        _rows.Insert(0, new RunRow(DateTime.Now.ToString("HH:mm:ss"), scheme, op, variant, ok, summary, rawJson));
+        string duration = FormatDuration(result.Elapsed);
+        _rows.Insert(0, new RunRow(DateTime.Now.ToString("HH:mm:ss"), scheme, op, variant, ok, duration, summary, rawJson));
         if (_grid.Rows.Count > 0)
         {
             _grid.ClearSelection();
@@ -420,6 +422,9 @@ internal sealed class MainForm : Form
             _detailBox.Text = row.RawJson;
         }
     }
+
+    private static string FormatDuration(TimeSpan elapsed) =>
+        elapsed.TotalSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + " s";
 
     private static string ResolveKeygenFolder(string? requestedFolder, string variant)
     {
