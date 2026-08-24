@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace PadaUI;
+namespace PKaido;
 
 internal sealed record CliResult(int ExitCode, string StdOut, string StdErr, TimeSpan Elapsed);
 

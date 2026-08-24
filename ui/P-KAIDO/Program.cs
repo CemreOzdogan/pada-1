@@ -1,4 +1,4 @@
-namespace PadaUI;
+namespace PKaido;
 
 internal static class Program
 {

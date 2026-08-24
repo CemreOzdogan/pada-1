@@ -3,7 +3,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 
-namespace PadaUI;
+namespace PKaido;
 
 internal sealed class MainForm : Form
 {
