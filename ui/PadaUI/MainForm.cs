@@ -63,7 +63,7 @@ internal sealed class MainForm : Form
     private readonly TextBox _cliPathBox;
     private readonly ComboBox _schemeBox;
     private readonly FlowLayoutPanel _variantPanel;
-    private readonly ComboBox _opBox;
+    private readonly FlowLayoutPanel _operationPanel;
     private readonly TableLayoutPanel _fieldsPanel;
     private readonly DataGridView _grid;
     private readonly TextBox _detailBox;
@@ -84,12 +84,13 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 7,
             Padding = new Padding(10),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // cli path
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // scheme / operation
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // scheme
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // variant
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // operation
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // dynamic fields + run button
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // results grid — takes all remaining space
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); // JSON detail — fixed, small
@@ -108,19 +109,14 @@ internal sealed class MainForm : Form
         cliRow.Controls.Add(browseCliButton, 2, 0);
         root.Controls.Add(cliRow, 0, 0);
 
-        // --- Scheme / operation row ---
-        var pickerRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, AutoSize = true };
-        pickerRow.Controls.Add(new Label { Text = "Scheme:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
+        // --- Scheme row ---
+        var schemeRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
+        schemeRow.Controls.Add(new Label { Text = "Scheme:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
         _schemeBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
         _schemeBox.Items.AddRange(["ML-DSA", "ML-KEM"]);
         _schemeBox.SelectedIndexChanged += (_, _) => OnSchemeChanged();
-        pickerRow.Controls.Add(_schemeBox);
-
-        pickerRow.Controls.Add(new Label { Text = "Operation:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(12, 6, 6, 0) });
-        _opBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
-        _opBox.SelectedIndexChanged += (_, _) => OnOperationChanged();
-        pickerRow.Controls.Add(_opBox);
-        root.Controls.Add(pickerRow, 0, 1);
+        schemeRow.Controls.Add(_schemeBox);
+        root.Controls.Add(schemeRow, 0, 1);
 
         // --- Variant row: all options shown at once, no dropdown/scrolling ---
         var variantRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
@@ -135,22 +131,53 @@ internal sealed class MainForm : Form
         variantRow.Controls.Add(_variantPanel);
         root.Controls.Add(variantRow, 0, 2);
 
+        // --- Operation row: all options shown at once, no dropdown/scrolling ---
+        var operationRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
+        operationRow.Controls.Add(new Label { Text = "Operation:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
+        _operationPanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+        };
+        operationRow.Controls.Add(_operationPanel);
+        root.Controls.Add(operationRow, 0, 3);
+
         // --- Dynamic file fields ---
-        _fieldsPanel = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, AutoSize = true, Padding = new Padding(0, 6, 0, 6) };
+        // Every field must always be fully visible — no internal scrollbar. Plain Panels with
+        // Dock=Fill children don't report their content size upward for AutoSize rows to use,
+        // so this whole area is built from AutoSize-aware TableLayoutPanels/FlowLayoutPanels.
+        _fieldsPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(0, 6, 0, 6),
+        };
         _fieldsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _fieldsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         _fieldsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var fieldsHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        fieldsHost.Controls.Add(_fieldsPanel);
+
         var runButton = new Button { Text = "Run", Width = 100, Height = 32, Anchor = AnchorStyles.Right };
         runButton.Click += (_, _) => RunClicked();
-        var runRow = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
+        var runRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
         runRow.Controls.Add(runButton);
 
-        var fieldsGroup = new Panel { Dock = DockStyle.Fill };
-        fieldsGroup.Controls.Add(fieldsHost);
-        fieldsGroup.Controls.Add(runRow);
-        root.Controls.Add(fieldsGroup, 0, 3);
+        var fieldsGroup = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+        fieldsGroup.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        fieldsGroup.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        fieldsGroup.Controls.Add(_fieldsPanel, 0, 0);
+        fieldsGroup.Controls.Add(runRow, 0, 1);
+        root.Controls.Add(fieldsGroup, 0, 4);
 
         // --- Results grid ---
         _grid = new DataGridView
@@ -172,7 +199,7 @@ internal sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
         _grid.DataSource = _rows;
         _grid.SelectionChanged += (_, _) => OnGridSelectionChanged();
-        root.Controls.Add(_grid, 0, 4);
+        root.Controls.Add(_grid, 0, 5);
 
         // --- Detail box ---
         _detailBox = new TextBox
@@ -183,7 +210,7 @@ internal sealed class MainForm : Form
             ScrollBars = ScrollBars.Vertical,
             Font = new Font(FontFamily.GenericMonospace, 9),
         };
-        root.Controls.Add(_detailBox, 0, 5);
+        root.Controls.Add(_detailBox, 0, 6);
 
         _schemeBox.SelectedIndex = 0;
     }
@@ -205,13 +232,37 @@ internal sealed class MainForm : Form
             });
         }
 
-        _opBox.Items.Clear();
-        _opBox.Items.AddRange(OperationsByScheme[scheme]);
-        _opBox.SelectedIndex = 0;
+        _operationPanel.Controls.Clear();
+        var operations = OperationsByScheme[scheme];
+        for (int i = 0; i < operations.Length; i++)
+        {
+            var radio = new RadioButton
+            {
+                Text = operations[i],
+                AutoSize = true,
+                Checked = i == 0,
+                Margin = new Padding(0, 4, 16, 4),
+            };
+            radio.CheckedChanged += (sender, _) =>
+            {
+                if (((RadioButton)sender!).Checked)
+                {
+                    OnOperationChanged();
+                }
+            };
+            _operationPanel.Controls.Add(radio);
+        }
+
+        OnOperationChanged();
     }
 
     private string? GetSelectedVariant() =>
         _variantPanel.Controls
+            .OfType<RadioButton>()
+            .FirstOrDefault(r => r.Checked)?.Text;
+
+    private string? GetSelectedOperation() =>
+        _operationPanel.Controls
             .OfType<RadioButton>()
             .FirstOrDefault(r => r.Checked)?.Text;
 
@@ -222,7 +273,7 @@ internal sealed class MainForm : Form
         _fieldsPanel.RowCount = 0;
         _currentFields.Clear();
 
-        if (_schemeBox.SelectedItem is not string scheme || _opBox.SelectedItem is not string op)
+        if (_schemeBox.SelectedItem is not string scheme || GetSelectedOperation() is not string op)
         {
             return;
         }
@@ -325,7 +376,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (_schemeBox.SelectedItem is not string scheme || GetSelectedVariant() is not string variant || _opBox.SelectedItem is not string op)
+        if (_schemeBox.SelectedItem is not string scheme || GetSelectedVariant() is not string variant || GetSelectedOperation() is not string op)
         {
             return;
         }
