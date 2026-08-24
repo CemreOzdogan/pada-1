@@ -6,6 +6,9 @@ Cargo.lock.bak
 # Generated key material — never commit private/public keys, this repo is public
 /keys/
 
+# Typed messages saved by the UI's "type text to sign" option
+/messages/
+
 # .NET / WinForms
 **/bin/
 **/obj/

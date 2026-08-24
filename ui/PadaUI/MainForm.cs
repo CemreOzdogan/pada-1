@@ -1,11 +1,12 @@
 using System.ComponentModel;
+using System.Text;
 using System.Text.Json;
 
 namespace PadaUI;
 
 internal sealed class MainForm : Form
 {
-    private enum FieldKind { InputFile, OutputFile, OutputFolder }
+    private enum FieldKind { InputFile, OutputFile, OutputFolder, TextMessage }
 
     private sealed record FieldSpec(string ArgName, string Label, FieldKind Kind, bool Required);
 
@@ -30,8 +31,9 @@ internal sealed class MainForm : Form
         [("ML-DSA", "Sign")] =
         [
             new FieldSpec("sk", "Signing key (sk)", FieldKind.InputFile, Required: true),
-            new FieldSpec("file", "File to sign", FieldKind.InputFile, Required: true),
-            new FieldSpec("sig-out", "Signature out (blank = <file>.sig)", FieldKind.OutputFile, Required: false),
+            new FieldSpec("file", "File to sign (leave blank if typing text below)", FieldKind.InputFile, Required: false),
+            new FieldSpec("text", "...or type text to sign", FieldKind.TextMessage, Required: false),
+            new FieldSpec("sig-out", "Signature out (blank = default)", FieldKind.OutputFile, Required: false),
         ],
         [("ML-DSA", "Verify")] =
         [
@@ -215,13 +217,30 @@ internal sealed class MainForm : Form
                 Padding = new Padding(0, 6, 6, 0),
             }, 0, i);
 
-            var box = new TextBox { Dock = DockStyle.Fill };
+            TextBox box;
+            if (spec.Kind == FieldKind.TextMessage)
+            {
+                box = new TextBox
+                {
+                    Multiline = true,
+                    Height = 70,
+                    ScrollBars = ScrollBars.Vertical,
+                    Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+                };
+            }
+            else
+            {
+                box = new TextBox { Dock = DockStyle.Fill };
+            }
             _fieldsPanel.Controls.Add(box, 1, i);
 
-            var browse = new Button { Text = "Browse...", AutoSize = true };
-            var capturedSpec = spec;
-            browse.Click += (_, _) => BrowseForField(box, capturedSpec);
-            _fieldsPanel.Controls.Add(browse, 2, i);
+            if (spec.Kind != FieldKind.TextMessage)
+            {
+                var browse = new Button { Text = "Browse...", AutoSize = true };
+                var capturedSpec = spec;
+                browse.Click += (_, _) => BrowseForField(box, capturedSpec);
+                _fieldsPanel.Controls.Add(browse, 2, i);
+            }
 
             _currentFields.Add((box, spec));
         }
@@ -317,6 +336,71 @@ internal sealed class MainForm : Form
             args.Add("--pk-out");
             args.Add(Path.Combine(folder, $"{variant}-pk.bin"));
         }
+        else if (op == "Sign")
+        {
+            TextBox? skBox = null, fileBox = null, textBox = null, sigOutBox = null;
+            foreach (var (box, spec) in _currentFields)
+            {
+                switch (spec.ArgName)
+                {
+                    case "sk": skBox = box; break;
+                    case "file": fileBox = box; break;
+                    case "text": textBox = box; break;
+                    case "sig-out": sigOutBox = box; break;
+                }
+            }
+
+            if (skBox is null || string.IsNullOrWhiteSpace(skBox.Text))
+            {
+                MessageBox.Show(this, "'Signing key (sk)' is required.", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            bool hasFile = fileBox is not null && !string.IsNullOrWhiteSpace(fileBox.Text);
+            bool hasText = textBox is not null && !string.IsNullOrWhiteSpace(textBox.Text);
+
+            if (hasFile == hasText)
+            {
+                MessageBox.Show(
+                    this,
+                    hasFile
+                        ? "Provide either a file to sign or typed text — not both."
+                        : "Nothing to sign. Pick a file, or type text in the box below.",
+                    "pada-1",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            args.Add("--sk");
+            args.Add(skBox.Text);
+
+            string fileToSign;
+            if (hasFile)
+            {
+                fileToSign = fileBox!.Text;
+            }
+            else
+            {
+                try
+                {
+                    fileToSign = WriteTypedMessage(textBox!.Text, variant);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, $"Couldn't save typed text:\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+            args.Add("--file");
+            args.Add(fileToSign);
+
+            if (sigOutBox is not null && !string.IsNullOrWhiteSpace(sigOutBox.Text))
+            {
+                args.Add("--sig-out");
+                args.Add(sigOutBox.Text);
+            }
+        }
         else
         {
             foreach (var (box, spec) in _currentFields)
@@ -398,7 +482,8 @@ internal sealed class MainForm : Form
 
         if (root.TryGetProperty("signature_path", out var sigPath))
         {
-            return $"signed, signature at {sigPath.GetString()}";
+            string signedFile = root.TryGetProperty("file", out var f) ? f.GetString() ?? "?" : "?";
+            return $"signed '{signedFile}', signature at {sigPath.GetString()}";
         }
 
         return "ok";
@@ -434,21 +519,32 @@ internal sealed class MainForm : Form
         }
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        return Path.Combine(FindRepoKeysRoot(), $"{stamp}_{variant}");
+        return Path.Combine(FindRepoRoot(), "keys", $"{stamp}_{variant}");
     }
 
-    private static string FindRepoKeysRoot()
+    private static string WriteTypedMessage(string text, string variant)
+    {
+        var folder = Path.Combine(FindRepoRoot(), "messages");
+        Directory.CreateDirectory(folder);
+
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var path = Path.Combine(folder, $"{stamp}_{variant}.txt");
+        File.WriteAllText(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return path;
+    }
+
+    private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
         {
             if (Directory.Exists(Path.Combine(dir.FullName, "engines")) && Directory.Exists(Path.Combine(dir.FullName, "ui")))
             {
-                return Path.Combine(dir.FullName, "keys");
+                return dir.FullName;
             }
         }
 
-        return Path.Combine(AppContext.BaseDirectory, "keys");
+        return AppContext.BaseDirectory;
     }
 
     private static string? FindDefaultCliPath()
