@@ -2,6 +2,11 @@
 //! standardized ML-KEM parameter sets (FIPS 203). Mirrors the public API of
 //! `pqc-ml-kem-rustcrypto` (same `Variant`/`KeyPair`/`Encapsulated` shape and
 //! function signatures) so `pqc-cli` can select either backend interchangeably.
+//!
+//! `sk_seed` is the original 64-byte keygen seed (not the expanded private
+//! key), matching what `pqc-ml-kem-rustcrypto` persists — and what
+//! `pqc-ml-dsa-libcrux` does for ML-DSA. The full private key is re-derived
+//! from it before every decapsulate.
 
 use libcrux_ml_kem::{KEY_GENERATION_SEED_SIZE, SHARED_SECRET_SIZE};
 
@@ -73,13 +78,22 @@ fn random_seed<const N: usize>() -> [u8; N] {
     buf
 }
 
+fn seed_from_slice(sk_seed: &[u8]) -> Result<[u8; KEY_GENERATION_SEED_SIZE], String> {
+    sk_seed.try_into().map_err(|_| {
+        format!(
+            "secret key must be exactly {KEY_GENERATION_SEED_SIZE} bytes, got {}",
+            sk_seed.len()
+        )
+    })
+}
+
 macro_rules! impl_variant {
-    ($mod_path:ident, $pk_ty:ident, $sk_ty:ident, $ct_ty:ident, $keygen_fn:ident, $encap_fn:ident, $decap_fn:ident) => {
+    ($mod_path:ident, $pk_ty:ident, $ct_ty:ident, $keygen_fn:ident, $encap_fn:ident, $decap_fn:ident) => {
         fn $keygen_fn() -> KeyPair {
             let seed = random_seed::<KEY_GENERATION_SEED_SIZE>();
             let kp = libcrux_ml_kem::$mod_path::generate_key_pair(seed);
             KeyPair {
-                sk_seed: kp.sk().to_vec(),
+                sk_seed: seed.to_vec(),
                 pk_bytes: kp.pk().to_vec(),
             }
         }
@@ -96,13 +110,12 @@ macro_rules! impl_variant {
         }
 
         fn $decap_fn(sk_seed: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
-            let sk = libcrux_ml_kem::$mod_path::$sk_ty::try_from(sk_seed).map_err(|_| {
-                format!("secret key has wrong length ({} bytes)", sk_seed.len())
-            })?;
+            let seed = seed_from_slice(sk_seed)?;
+            let kp = libcrux_ml_kem::$mod_path::generate_key_pair(seed);
             let ct = libcrux_ml_kem::$mod_path::$ct_ty::try_from(ciphertext).map_err(|_| {
                 format!("ciphertext has wrong length ({} bytes)", ciphertext.len())
             })?;
-            let ss = libcrux_ml_kem::$mod_path::decapsulate(&sk, &ct);
+            let ss = libcrux_ml_kem::$mod_path::decapsulate(kp.private_key(), &ct);
             Ok(ss.as_slice().to_vec())
         }
     };
@@ -111,7 +124,6 @@ macro_rules! impl_variant {
 impl_variant!(
     mlkem512,
     MlKem512PublicKey,
-    MlKem512PrivateKey,
     MlKem512Ciphertext,
     keygen_512,
     encapsulate_512,
@@ -120,7 +132,6 @@ impl_variant!(
 impl_variant!(
     mlkem768,
     MlKem768PublicKey,
-    MlKem768PrivateKey,
     MlKem768Ciphertext,
     keygen_768,
     encapsulate_768,
@@ -129,7 +140,6 @@ impl_variant!(
 impl_variant!(
     mlkem1024,
     MlKem1024PublicKey,
-    MlKem1024PrivateKey,
     MlKem1024Ciphertext,
     keygen_1024,
     encapsulate_1024,
