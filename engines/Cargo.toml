@@ -1,10 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
+    "pqc-ml-kem",
+    "pqc-ml-dsa",
+    "pqc-cli",
+]
+
+# pqc-contracts, pqc-reference, pqc-generic are parked, not deleted:
+# future work for non-standard-parameter exploration and generic-vs-reference
+# benchmarking. Excluded from the workspace so they don't need to compile.
+exclude = [
     "pqc-contracts",
     "pqc-reference",
     "pqc-generic",
-    "pqc-cli",
 ]
 
 [workspace.package]
