@@ -62,6 +62,7 @@ internal sealed class MainForm : Form
 
     private readonly TextBox _cliPathBox;
     private readonly ComboBox _schemeBox;
+    private readonly FlowLayoutPanel _enginePanel;
     private readonly FlowLayoutPanel _variantPanel;
     private readonly FlowLayoutPanel _operationPanel;
     private readonly TableLayoutPanel _fieldsPanel;
@@ -84,11 +85,12 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 9,
+            RowCount = 10,
             Padding = new Padding(10),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // cli path
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // scheme
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // engine
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // variant
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // operation
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // dynamic fields + run button
@@ -120,6 +122,30 @@ internal sealed class MainForm : Form
         schemeRow.Controls.Add(_schemeBox);
         root.Controls.Add(schemeRow, 0, 1);
 
+        // --- Engine row: which crypto backend to use (RustCrypto or libcrux) ---
+        var engineRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
+        engineRow.Controls.Add(new Label { Text = "Engine:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
+        _enginePanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+        };
+        string[] engines = ["rustcrypto", "libcrux"];
+        for (int i = 0; i < engines.Length; i++)
+        {
+            _enginePanel.Controls.Add(new RadioButton
+            {
+                Text = engines[i],
+                AutoSize = true,
+                Checked = i == 0,
+                Margin = new Padding(0, 4, 16, 4),
+            });
+        }
+        engineRow.Controls.Add(_enginePanel);
+        root.Controls.Add(engineRow, 0, 2);
+
         // --- Variant row: all options shown at once, no dropdown/scrolling ---
         var variantRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
         variantRow.Controls.Add(new Label { Text = "Variant:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
@@ -131,7 +157,7 @@ internal sealed class MainForm : Form
             WrapContents = false,
         };
         variantRow.Controls.Add(_variantPanel);
-        root.Controls.Add(variantRow, 0, 2);
+        root.Controls.Add(variantRow, 0, 3);
 
         // --- Operation row: all options shown at once, no dropdown/scrolling ---
         var operationRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
@@ -144,7 +170,7 @@ internal sealed class MainForm : Form
             WrapContents = false,
         };
         operationRow.Controls.Add(_operationPanel);
-        root.Controls.Add(operationRow, 0, 3);
+        root.Controls.Add(operationRow, 0, 4);
 
         // --- Dynamic file fields ---
         // Every field must always be fully visible — no internal scrollbar. Plain Panels with
@@ -179,7 +205,7 @@ internal sealed class MainForm : Form
         fieldsGroup.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         fieldsGroup.Controls.Add(_fieldsPanel, 0, 0);
         fieldsGroup.Controls.Add(runRow, 0, 1);
-        root.Controls.Add(fieldsGroup, 0, 4);
+        root.Controls.Add(fieldsGroup, 0, 5);
 
         // --- Drop a file here to view its hex, no need to run it through an operation ---
         var inspectZone = new Label
@@ -211,7 +237,7 @@ internal sealed class MainForm : Form
             }
         };
         inspectZone.Click += (_, _) => BrowseAndInspectFile();
-        root.Controls.Add(inspectZone, 0, 5);
+        root.Controls.Add(inspectZone, 0, 6);
 
         // --- Results grid ---
         _grid = new DataGridView
@@ -233,7 +259,7 @@ internal sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
         _grid.DataSource = _rows;
         _grid.SelectionChanged += (_, _) => OnGridSelectionChanged();
-        root.Controls.Add(_grid, 0, 6);
+        root.Controls.Add(_grid, 0, 7);
 
         // --- Detail box ---
         _detailBox = new TextBox
@@ -244,7 +270,7 @@ internal sealed class MainForm : Form
             ScrollBars = ScrollBars.Vertical,
             Font = new Font(FontFamily.GenericMonospace, 9),
         };
-        root.Controls.Add(_detailBox, 0, 7);
+        root.Controls.Add(_detailBox, 0, 8);
 
         // --- Footer ---
         var footerLabel = new Label
@@ -256,7 +282,7 @@ internal sealed class MainForm : Form
             ForeColor = SystemColors.GrayText,
             Padding = new Padding(0, 6, 0, 0),
         };
-        root.Controls.Add(footerLabel, 0, 8);
+        root.Controls.Add(footerLabel, 0, 9);
 
         _schemeBox.SelectedIndex = 0;
     }
@@ -309,6 +335,11 @@ internal sealed class MainForm : Form
 
     private string? GetSelectedOperation() =>
         _operationPanel.Controls
+            .OfType<RadioButton>()
+            .FirstOrDefault(r => r.Checked)?.Text;
+
+    private string? GetSelectedEngine() =>
+        _enginePanel.Controls
             .OfType<RadioButton>()
             .FirstOrDefault(r => r.Checked)?.Text;
 
@@ -422,14 +453,14 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (_schemeBox.SelectedItem is not string scheme || GetSelectedVariant() is not string variant || GetSelectedOperation() is not string op)
+        if (_schemeBox.SelectedItem is not string scheme || GetSelectedVariant() is not string variant || GetSelectedOperation() is not string op || GetSelectedEngine() is not string engine)
         {
             return;
         }
 
         var schemeArg = scheme == "ML-DSA" ? "ml-dsa" : "ml-kem";
         var opArg = op.ToLowerInvariant();
-        var args = new List<string> { schemeArg, opArg, "--variant", variant };
+        var args = new List<string> { schemeArg, opArg, "--variant", variant, "--engine", engine };
 
         if (op == "Keygen")
         {

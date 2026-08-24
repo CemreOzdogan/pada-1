@@ -1,9 +1,8 @@
 [package]
-name = "pqc-ml-kem"
+name = "pqc-ml-kem-libcrux"
 edition = "2021"
 version = "0.1.0"
 
 [dependencies]
-ml-kem = { version = "0.3.2", features = ["getrandom"] }
-kem = "0.3.0"
+libcrux-ml-kem = "0.0.10"
 getrandom = { version = "0.4.3", features = ["std"] }

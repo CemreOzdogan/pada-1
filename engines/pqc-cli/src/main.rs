@@ -2,8 +2,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::json;
+
+#[derive(Clone, Copy, ValueEnum)]
+#[value(rename_all = "lowercase")]
+enum Engine {
+    Rustcrypto,
+    Libcrux,
+}
+
+impl Engine {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Rustcrypto => "rustcrypto",
+            Self::Libcrux => "libcrux",
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "pqc-cli", about = "Sign/verify with ML-DSA, encapsulate/decapsulate with ML-KEM")]
@@ -51,6 +67,8 @@ struct DsaKeygenArgs {
     /// ml-dsa-44, ml-dsa-65, or ml-dsa-87
     #[arg(long)]
     variant: String,
+    #[arg(long, value_enum, default_value_t = Engine::Rustcrypto)]
+    engine: Engine,
     #[arg(long)]
     sk_out: PathBuf,
     #[arg(long)]
@@ -61,6 +79,8 @@ struct DsaKeygenArgs {
 struct DsaSignArgs {
     #[arg(long)]
     variant: String,
+    #[arg(long, value_enum, default_value_t = Engine::Rustcrypto)]
+    engine: Engine,
     #[arg(long)]
     sk: PathBuf,
     /// File to sign
@@ -75,6 +95,8 @@ struct DsaSignArgs {
 struct DsaVerifyArgs {
     #[arg(long)]
     variant: String,
+    #[arg(long, value_enum, default_value_t = Engine::Rustcrypto)]
+    engine: Engine,
     #[arg(long)]
     pk: PathBuf,
     /// File whose signature is being checked
@@ -89,6 +111,8 @@ struct KemKeygenArgs {
     /// ml-kem-512, ml-kem-768, or ml-kem-1024
     #[arg(long)]
     variant: String,
+    #[arg(long, value_enum, default_value_t = Engine::Rustcrypto)]
+    engine: Engine,
     #[arg(long)]
     sk_out: PathBuf,
     #[arg(long)]
@@ -99,6 +123,8 @@ struct KemKeygenArgs {
 struct EncapsulateArgs {
     #[arg(long)]
     variant: String,
+    #[arg(long, value_enum, default_value_t = Engine::Rustcrypto)]
+    engine: Engine,
     #[arg(long)]
     pk: PathBuf,
     #[arg(long)]
@@ -112,6 +138,8 @@ struct EncapsulateArgs {
 struct DecapsulateArgs {
     #[arg(long)]
     variant: String,
+    #[arg(long, value_enum, default_value_t = Engine::Rustcrypto)]
+    engine: Engine,
     #[arg(long)]
     sk: PathBuf,
     #[arg(long)]
@@ -151,32 +179,57 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
 }
 
 fn dsa_keygen(args: DsaKeygenArgs) -> Result<serde_json::Value, String> {
-    let variant = pqc_ml_dsa::Variant::parse(&args.variant)?;
-    let kp = pqc_ml_dsa::keygen(variant);
+    let (sk_seed, pk_bytes, variant_str) = match args.engine {
+        Engine::Rustcrypto => {
+            let variant = pqc_ml_dsa_rustcrypto::Variant::parse(&args.variant)?;
+            let kp = pqc_ml_dsa_rustcrypto::keygen(variant);
+            (kp.sk_seed, kp.pk_bytes, variant.as_str())
+        }
+        Engine::Libcrux => {
+            let variant = pqc_ml_dsa_libcrux::Variant::parse(&args.variant)?;
+            let kp = pqc_ml_dsa_libcrux::keygen(variant);
+            (kp.sk_seed, kp.pk_bytes, variant.as_str())
+        }
+    };
 
-    write_file(&args.sk_out, &kp.sk_seed)?;
-    write_file(&args.pk_out, &kp.pk_bytes)?;
+    write_file(&args.sk_out, &sk_seed)?;
+    write_file(&args.pk_out, &pk_bytes)?;
 
     Ok(json!({
         "ok": true,
         "scheme": "ml-dsa",
         "op": "keygen",
-        "variant": variant.as_str(),
+        "variant": variant_str,
+        "engine": args.engine.as_str(),
         "sk_path": path_str(&args.sk_out),
         "pk_path": path_str(&args.pk_out),
-        "sk_bytes": kp.sk_seed.len(),
-        "pk_bytes": kp.pk_bytes.len(),
-        "sk_hex": hex_encode(&kp.sk_seed),
-        "pk_hex": hex_encode(&kp.pk_bytes),
+        "sk_bytes": sk_seed.len(),
+        "pk_bytes": pk_bytes.len(),
+        "sk_hex": hex_encode(&sk_seed),
+        "pk_hex": hex_encode(&pk_bytes),
     }))
 }
 
 fn dsa_sign(args: DsaSignArgs) -> Result<serde_json::Value, String> {
-    let variant = pqc_ml_dsa::Variant::parse(&args.variant)?;
     let sk_seed = read_file(&args.sk)?;
     let message = read_file(&args.file)?;
 
-    let signature = pqc_ml_dsa::sign(variant, &sk_seed, &message)?;
+    let (signature, variant_str) = match args.engine {
+        Engine::Rustcrypto => {
+            let variant = pqc_ml_dsa_rustcrypto::Variant::parse(&args.variant)?;
+            (
+                pqc_ml_dsa_rustcrypto::sign(variant, &sk_seed, &message)?,
+                variant.as_str(),
+            )
+        }
+        Engine::Libcrux => {
+            let variant = pqc_ml_dsa_libcrux::Variant::parse(&args.variant)?;
+            (
+                pqc_ml_dsa_libcrux::sign(variant, &sk_seed, &message)?,
+                variant.as_str(),
+            )
+        }
+    };
 
     let sig_out = args
         .sig_out
@@ -187,7 +240,8 @@ fn dsa_sign(args: DsaSignArgs) -> Result<serde_json::Value, String> {
         "ok": true,
         "scheme": "ml-dsa",
         "op": "sign",
-        "variant": variant.as_str(),
+        "variant": variant_str,
+        "engine": args.engine.as_str(),
         "file": path_str(&args.file),
         "signature_path": path_str(&sig_out),
         "signature_bytes": signature.len(),
@@ -196,18 +250,33 @@ fn dsa_sign(args: DsaSignArgs) -> Result<serde_json::Value, String> {
 }
 
 fn dsa_verify(args: DsaVerifyArgs) -> Result<serde_json::Value, String> {
-    let variant = pqc_ml_dsa::Variant::parse(&args.variant)?;
     let pk_bytes = read_file(&args.pk)?;
     let message = read_file(&args.file)?;
     let signature = read_file(&args.sig)?;
 
-    let valid = pqc_ml_dsa::verify(variant, &pk_bytes, &message, &signature)?;
+    let (valid, variant_str) = match args.engine {
+        Engine::Rustcrypto => {
+            let variant = pqc_ml_dsa_rustcrypto::Variant::parse(&args.variant)?;
+            (
+                pqc_ml_dsa_rustcrypto::verify(variant, &pk_bytes, &message, &signature)?,
+                variant.as_str(),
+            )
+        }
+        Engine::Libcrux => {
+            let variant = pqc_ml_dsa_libcrux::Variant::parse(&args.variant)?;
+            (
+                pqc_ml_dsa_libcrux::verify(variant, &pk_bytes, &message, &signature)?,
+                variant.as_str(),
+            )
+        }
+    };
 
     Ok(json!({
         "ok": true,
         "scheme": "ml-dsa",
         "op": "verify",
-        "variant": variant.as_str(),
+        "variant": variant_str,
+        "engine": args.engine.as_str(),
         "file": path_str(&args.file),
         "signature_path": path_str(&args.sig),
         "valid": valid,
@@ -217,57 +286,93 @@ fn dsa_verify(args: DsaVerifyArgs) -> Result<serde_json::Value, String> {
 }
 
 fn kem_keygen(args: KemKeygenArgs) -> Result<serde_json::Value, String> {
-    let variant = pqc_ml_kem::Variant::parse(&args.variant)?;
-    let kp = pqc_ml_kem::keygen(variant);
+    let (sk_seed, pk_bytes, variant_str) = match args.engine {
+        Engine::Rustcrypto => {
+            let variant = pqc_ml_kem_rustcrypto::Variant::parse(&args.variant)?;
+            let kp = pqc_ml_kem_rustcrypto::keygen(variant);
+            (kp.sk_seed, kp.pk_bytes, variant.as_str())
+        }
+        Engine::Libcrux => {
+            let variant = pqc_ml_kem_libcrux::Variant::parse(&args.variant)?;
+            let kp = pqc_ml_kem_libcrux::keygen(variant);
+            (kp.sk_seed, kp.pk_bytes, variant.as_str())
+        }
+    };
 
-    write_file(&args.sk_out, &kp.sk_seed)?;
-    write_file(&args.pk_out, &kp.pk_bytes)?;
+    write_file(&args.sk_out, &sk_seed)?;
+    write_file(&args.pk_out, &pk_bytes)?;
 
     Ok(json!({
         "ok": true,
         "scheme": "ml-kem",
         "op": "keygen",
-        "variant": variant.as_str(),
+        "variant": variant_str,
+        "engine": args.engine.as_str(),
         "sk_path": path_str(&args.sk_out),
         "pk_path": path_str(&args.pk_out),
-        "sk_bytes": kp.sk_seed.len(),
-        "pk_bytes": kp.pk_bytes.len(),
-        "sk_hex": hex_encode(&kp.sk_seed),
-        "pk_hex": hex_encode(&kp.pk_bytes),
+        "sk_bytes": sk_seed.len(),
+        "pk_bytes": pk_bytes.len(),
+        "sk_hex": hex_encode(&sk_seed),
+        "pk_hex": hex_encode(&pk_bytes),
     }))
 }
 
 fn kem_encapsulate(args: EncapsulateArgs) -> Result<serde_json::Value, String> {
-    let variant = pqc_ml_kem::Variant::parse(&args.variant)?;
     let pk_bytes = read_file(&args.pk)?;
 
-    let result = pqc_ml_kem::encapsulate(variant, &pk_bytes)?;
+    let (ciphertext, shared_secret, variant_str) = match args.engine {
+        Engine::Rustcrypto => {
+            let variant = pqc_ml_kem_rustcrypto::Variant::parse(&args.variant)?;
+            let result = pqc_ml_kem_rustcrypto::encapsulate(variant, &pk_bytes)?;
+            (result.ciphertext, result.shared_secret, variant.as_str())
+        }
+        Engine::Libcrux => {
+            let variant = pqc_ml_kem_libcrux::Variant::parse(&args.variant)?;
+            let result = pqc_ml_kem_libcrux::encapsulate(variant, &pk_bytes)?;
+            (result.ciphertext, result.shared_secret, variant.as_str())
+        }
+    };
 
-    write_file(&args.ct_out, &result.ciphertext)?;
+    write_file(&args.ct_out, &ciphertext)?;
     if let Some(ss_out) = &args.ss_out {
-        write_file(ss_out, &result.shared_secret)?;
+        write_file(ss_out, &shared_secret)?;
     }
 
     Ok(json!({
         "ok": true,
         "scheme": "ml-kem",
         "op": "encapsulate",
-        "variant": variant.as_str(),
+        "variant": variant_str,
+        "engine": args.engine.as_str(),
         "public_key_path": path_str(&args.pk),
         "ciphertext_path": path_str(&args.ct_out),
-        "ciphertext_bytes": result.ciphertext.len(),
-        "ciphertext_hex": hex_encode(&result.ciphertext),
-        "shared_secret_hex": hex_encode(&result.shared_secret),
+        "ciphertext_bytes": ciphertext.len(),
+        "ciphertext_hex": hex_encode(&ciphertext),
+        "shared_secret_hex": hex_encode(&shared_secret),
         "shared_secret_path": args.ss_out.as_deref().map(path_str),
     }))
 }
 
 fn kem_decapsulate(args: DecapsulateArgs) -> Result<serde_json::Value, String> {
-    let variant = pqc_ml_kem::Variant::parse(&args.variant)?;
     let sk_seed = read_file(&args.sk)?;
     let ciphertext = read_file(&args.ct)?;
 
-    let shared_secret = pqc_ml_kem::decapsulate(variant, &sk_seed, &ciphertext)?;
+    let (shared_secret, variant_str) = match args.engine {
+        Engine::Rustcrypto => {
+            let variant = pqc_ml_kem_rustcrypto::Variant::parse(&args.variant)?;
+            (
+                pqc_ml_kem_rustcrypto::decapsulate(variant, &sk_seed, &ciphertext)?,
+                variant.as_str(),
+            )
+        }
+        Engine::Libcrux => {
+            let variant = pqc_ml_kem_libcrux::Variant::parse(&args.variant)?;
+            (
+                pqc_ml_kem_libcrux::decapsulate(variant, &sk_seed, &ciphertext)?,
+                variant.as_str(),
+            )
+        }
+    };
 
     if let Some(ss_out) = &args.ss_out {
         write_file(ss_out, &shared_secret)?;
@@ -277,7 +382,8 @@ fn kem_decapsulate(args: DecapsulateArgs) -> Result<serde_json::Value, String> {
         "ok": true,
         "scheme": "ml-kem",
         "op": "decapsulate",
-        "variant": variant.as_str(),
+        "variant": variant_str,
+        "engine": args.engine.as_str(),
         "secret_key_path": path_str(&args.sk),
         "ciphertext_path": path_str(&args.ct),
         "ciphertext_hex": hex_encode(&ciphertext),

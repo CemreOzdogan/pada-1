@@ -5,6 +5,8 @@ version = "0.1.0"
 
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
-pqc-ml-dsa = { version = "0.1.0", path = "../pqc-ml-dsa" }
-pqc-ml-kem = { version = "0.1.0", path = "../pqc-ml-kem" }
+pqc-ml-dsa-rustcrypto = { version = "0.1.0", path = "../pqc-ml-dsa-rustcrypto" }
+pqc-ml-kem-rustcrypto = { version = "0.1.0", path = "../pqc-ml-kem-rustcrypto" }
+pqc-ml-dsa-libcrux = { version = "0.1.0", path = "../pqc-ml-dsa-libcrux" }
+pqc-ml-kem-libcrux = { version = "0.1.0", path = "../pqc-ml-kem-libcrux" }
 serde_json = "1.0.151"

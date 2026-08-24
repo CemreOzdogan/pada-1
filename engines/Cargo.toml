@@ -1,8 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "pqc-ml-kem",
-    "pqc-ml-dsa",
+    "pqc-ml-kem-rustcrypto",
+    "pqc-ml-dsa-rustcrypto",
+    "pqc-ml-kem-libcrux",
+    "pqc-ml-dsa-libcrux",
     "pqc-cli",
 ]
 

@@ -1,0 +1,8 @@
+[package]
+name = "pqc-ml-dsa-libcrux"
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+libcrux-ml-dsa = "0.0.10"
+getrandom = { version = "0.4.3", features = ["std"] }
