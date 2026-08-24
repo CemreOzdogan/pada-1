@@ -5,7 +5,9 @@ namespace PadaUI;
 
 internal sealed class MainForm : Form
 {
-    private sealed record FieldSpec(string ArgName, string Label, bool IsOutput, bool Required);
+    private enum FieldKind { InputFile, OutputFile, OutputFolder }
+
+    private sealed record FieldSpec(string ArgName, string Label, FieldKind Kind, bool Required);
 
     private static readonly Dictionary<string, string[]> VariantsByScheme = new()
     {
@@ -23,37 +25,35 @@ internal sealed class MainForm : Form
     {
         [("ML-DSA", "Keygen")] =
         [
-            new FieldSpec("sk-out", "Signing key (sk) out", IsOutput: true, Required: true),
-            new FieldSpec("pk-out", "Public key (pk) out", IsOutput: true, Required: true),
+            new FieldSpec("out-dir", "Output folder (optional — defaults inside pada-1/keys)", FieldKind.OutputFolder, Required: false),
         ],
         [("ML-DSA", "Sign")] =
         [
-            new FieldSpec("sk", "Signing key (sk)", IsOutput: false, Required: true),
-            new FieldSpec("file", "File to sign", IsOutput: false, Required: true),
-            new FieldSpec("sig-out", "Signature out (blank = <file>.sig)", IsOutput: true, Required: false),
+            new FieldSpec("sk", "Signing key (sk)", FieldKind.InputFile, Required: true),
+            new FieldSpec("file", "File to sign", FieldKind.InputFile, Required: true),
+            new FieldSpec("sig-out", "Signature out (blank = <file>.sig)", FieldKind.OutputFile, Required: false),
         ],
         [("ML-DSA", "Verify")] =
         [
-            new FieldSpec("pk", "Public key (pk)", IsOutput: false, Required: true),
-            new FieldSpec("file", "Signed file", IsOutput: false, Required: true),
-            new FieldSpec("sig", "Signature", IsOutput: false, Required: true),
+            new FieldSpec("pk", "Public key (pk)", FieldKind.InputFile, Required: true),
+            new FieldSpec("file", "Signed file", FieldKind.InputFile, Required: true),
+            new FieldSpec("sig", "Signature", FieldKind.InputFile, Required: true),
         ],
         [("ML-KEM", "Keygen")] =
         [
-            new FieldSpec("sk-out", "Secret key (sk) out", IsOutput: true, Required: true),
-            new FieldSpec("pk-out", "Public key (pk) out", IsOutput: true, Required: true),
+            new FieldSpec("out-dir", "Output folder (optional — defaults inside pada-1/keys)", FieldKind.OutputFolder, Required: false),
         ],
         [("ML-KEM", "Encapsulate")] =
         [
-            new FieldSpec("pk", "Public key (pk)", IsOutput: false, Required: true),
-            new FieldSpec("ct-out", "Ciphertext out", IsOutput: true, Required: true),
-            new FieldSpec("ss-out", "Shared secret out (optional)", IsOutput: true, Required: false),
+            new FieldSpec("pk", "Public key (pk)", FieldKind.InputFile, Required: true),
+            new FieldSpec("ct-out", "Ciphertext out", FieldKind.OutputFile, Required: true),
+            new FieldSpec("ss-out", "Shared secret out (optional)", FieldKind.OutputFile, Required: false),
         ],
         [("ML-KEM", "Decapsulate")] =
         [
-            new FieldSpec("sk", "Secret key (sk)", IsOutput: false, Required: true),
-            new FieldSpec("ct", "Ciphertext", IsOutput: false, Required: true),
-            new FieldSpec("ss-out", "Shared secret out (optional)", IsOutput: true, Required: false),
+            new FieldSpec("sk", "Secret key (sk)", FieldKind.InputFile, Required: true),
+            new FieldSpec("ct", "Ciphertext", FieldKind.InputFile, Required: true),
+            new FieldSpec("ss-out", "Shared secret out (optional)", FieldKind.OutputFile, Required: false),
         ],
     };
 
@@ -228,21 +228,38 @@ internal sealed class MainForm : Form
 
     private static void BrowseForField(TextBox box, FieldSpec spec)
     {
-        if (spec.IsOutput)
+        switch (spec.Kind)
         {
-            using var dialog = new SaveFileDialog { OverwritePrompt = false };
-            if (dialog.ShowDialog() == DialogResult.OK)
-            {
-                box.Text = dialog.FileName;
-            }
-        }
-        else
-        {
-            using var dialog = new OpenFileDialog();
-            if (dialog.ShowDialog() == DialogResult.OK)
-            {
-                box.Text = dialog.FileName;
-            }
+            case FieldKind.OutputFolder:
+                using (var dialog = new FolderBrowserDialog())
+                {
+                    if (dialog.ShowDialog() == DialogResult.OK)
+                    {
+                        box.Text = dialog.SelectedPath;
+                    }
+                }
+                break;
+
+            case FieldKind.OutputFile:
+                using (var dialog = new SaveFileDialog { OverwritePrompt = false })
+                {
+                    if (dialog.ShowDialog() == DialogResult.OK)
+                    {
+                        box.Text = dialog.FileName;
+                    }
+                }
+                break;
+
+            case FieldKind.InputFile:
+            default:
+                using (var dialog = new OpenFileDialog())
+                {
+                    if (dialog.ShowDialog() == DialogResult.OK)
+                    {
+                        box.Text = dialog.FileName;
+                    }
+                }
+                break;
         }
     }
 
@@ -268,25 +285,55 @@ internal sealed class MainForm : Form
             return;
         }
 
-        foreach (var (box, spec) in _currentFields)
-        {
-            if (spec.Required && string.IsNullOrWhiteSpace(box.Text))
-            {
-                MessageBox.Show(this, $"'{spec.Label}' is required.", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-        }
-
         var schemeArg = scheme == "ML-DSA" ? "ml-dsa" : "ml-kem";
         var opArg = op.ToLowerInvariant();
-
         var args = new List<string> { schemeArg, opArg, "--variant", variant };
-        foreach (var (box, spec) in _currentFields)
+
+        if (op == "Keygen")
         {
-            if (!string.IsNullOrWhiteSpace(box.Text))
+            string? requestedFolder = null;
+            foreach (var (box, spec) in _currentFields)
             {
-                args.Add("--" + spec.ArgName);
-                args.Add(box.Text);
+                if (spec.ArgName == "out-dir")
+                {
+                    requestedFolder = box.Text;
+                }
+            }
+
+            string folder = ResolveKeygenFolder(requestedFolder, variant);
+            try
+            {
+                Directory.CreateDirectory(folder);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Couldn't create '{folder}':\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            args.Add("--sk-out");
+            args.Add(Path.Combine(folder, $"{variant}-sk.bin"));
+            args.Add("--pk-out");
+            args.Add(Path.Combine(folder, $"{variant}-pk.bin"));
+        }
+        else
+        {
+            foreach (var (box, spec) in _currentFields)
+            {
+                if (spec.Required && string.IsNullOrWhiteSpace(box.Text))
+                {
+                    MessageBox.Show(this, $"'{spec.Label}' is required.", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            foreach (var (box, spec) in _currentFields)
+            {
+                if (!string.IsNullOrWhiteSpace(box.Text))
+                {
+                    args.Add("--" + spec.ArgName);
+                    args.Add(box.Text);
+                }
             }
         }
 
@@ -372,6 +419,31 @@ internal sealed class MainForm : Form
         {
             _detailBox.Text = row.RawJson;
         }
+    }
+
+    private static string ResolveKeygenFolder(string? requestedFolder, string variant)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedFolder))
+        {
+            return requestedFolder;
+        }
+
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        return Path.Combine(FindRepoKeysRoot(), $"{stamp}_{variant}");
+    }
+
+    private static string FindRepoKeysRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "engines")) && Directory.Exists(Path.Combine(dir.FullName, "ui")))
+            {
+                return Path.Combine(dir.FullName, "keys");
+            }
+        }
+
+        return Path.Combine(AppContext.BaseDirectory, "keys");
     }
 
     private static string? FindDefaultCliPath()

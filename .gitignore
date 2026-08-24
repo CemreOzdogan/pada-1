@@ -3,6 +3,9 @@
 **/target/
 Cargo.lock.bak
 
+# Generated key material — never commit private/public keys, this repo is public
+/keys/
+
 # .NET / WinForms
 **/bin/
 **/obj/
