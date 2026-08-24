@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bench-result.schema.json",
+  "title": "BenchResult",
+  "type": "object",
+  "required": ["engine", "parameter_set", "timings_ns", "sizes_bytes", "validity"],
+  "properties": {
+    "engine": { "enum": ["generic", "reference"] },
+    "parameter_set": { "$ref": "parameter-set.schema.json" },
+    "timings_ns": {
+      "type": "object",
+      "description": "keys: keygen/encaps/decaps (KEM) or keygen/sign/verify (DSA). Measured inside Rust (warmup + many iterations).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["median", "mean", "stddev", "samples"],
+        "properties": {
+          "median": { "type": "number" },
+          "mean": { "type": "number" },
+          "stddev": { "type": "number" },
+          "samples": { "type": "integer" }
+        }
+      }
+    },
+    "sizes_bytes": {
+      "type": "object",
+      "required": ["pk", "sk"],
+      "properties": {
+        "pk": { "type": "integer" },
+        "sk": { "type": "integer" },
+        "ct": { "type": "integer", "description": "KEM only" },
+        "sig": { "type": "integer", "description": "DSA only" }
+      }
+    },
+    "validity": {
+      "type": "object",
+      "required": ["roundtrip", "kat"],
+      "properties": {
+        "roundtrip": { "type": "boolean" },
+        "kat": { "enum": ["pass", "fail", "na"] }
+      }
+    },
+    "engine_version": {
+      "type": "string",
+      "description": "crate/build identifier, for provenance when comparing runs across code changes"
+    }
+  }
+}

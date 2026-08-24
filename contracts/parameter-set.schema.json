@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "parameter-set.schema.json",
+  "title": "ParameterSet",
+  "type": "object",
+  "required": ["scheme", "n", "q", "is_standard"],
+  "properties": {
+    "scheme": { "enum": ["ml-kem", "ml-dsa"] },
+    "name": {
+      "type": ["string", "null"],
+      "description": "e.g. \"ML-KEM-768\"; null for non-standard sets"
+    },
+    "is_standard": { "type": "boolean" },
+    "n": { "type": "integer" },
+    "q": { "type": "integer" },
+    "kem": {
+      "type": "object",
+      "description": "present iff scheme == ml-kem",
+      "required": ["k", "eta1", "eta2", "du", "dv"],
+      "properties": {
+        "k": { "type": "integer" },
+        "eta1": { "type": "integer" },
+        "eta2": { "type": "integer" },
+        "du": { "type": "integer" },
+        "dv": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "dsa": {
+      "type": "object",
+      "description": "present iff scheme == ml-dsa",
+      "required": ["k", "l", "eta", "gamma1", "gamma2", "tau", "omega"],
+      "properties": {
+        "k": { "type": "integer" },
+        "l": { "type": "integer" },
+        "eta": { "type": "integer" },
+        "gamma1": { "type": "integer" },
+        "gamma2": { "type": "integer" },
+        "tau": { "type": "integer" },
+        "omega": { "type": "integer" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "scheme": { "const": "ml-kem" } } },
+      "then": { "required": ["kem"] }
+    },
+    {
+      "if": { "properties": { "scheme": { "const": "ml-dsa" } } },
+      "then": { "required": ["dsa"] }
+    }
+  ]
+}

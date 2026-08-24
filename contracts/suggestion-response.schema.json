@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "suggestion-response.schema.json",
+  "title": "SuggestionResponse",
+  "type": "object",
+  "required": ["candidates"],
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["parameter_set", "security_bits", "valid"],
+        "properties": {
+          "parameter_set": { "$ref": "parameter-set.schema.json" },
+          "security_bits": { "type": "number" },
+          "valid": { "type": "boolean" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}

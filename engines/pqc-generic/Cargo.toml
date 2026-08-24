@@ -1,0 +1,9 @@
+[package]
+name = "pqc-generic"
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+getrandom = { version = "0.4.3", features = ["std"] }
+pqc-contracts = { version = "0.1.0", path = "../pqc-contracts" }
+sha3 = "0.12.0"

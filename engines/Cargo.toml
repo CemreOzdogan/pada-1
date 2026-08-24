@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "pqc-contracts",
+    "pqc-reference",
+    "pqc-generic",
+    "pqc-cli",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[profile.release]
+opt-level = 3

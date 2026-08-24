@@ -1,0 +1,8 @@
+[package]
+name = "pqc-reference"
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+ml-kem = { version = "0.3.2", features = ["getrandom"] }
+pqc-contracts = { version = "0.1.0", path = "../pqc-contracts" }
