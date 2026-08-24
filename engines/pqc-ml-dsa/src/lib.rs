@@ -119,12 +119,12 @@ mod tests {
 
     fn roundtrip(variant: Variant) {
         let kp = keygen(variant);
-        let msg = b"pada-1 smoke test message";
+        let msg = b"P-KAIDO smoke test message";
 
         let sig = sign(variant, &kp.sk_seed, msg).expect("sign should succeed");
         assert!(verify(variant, &kp.pk_bytes, msg, &sig).expect("verify should not error"));
 
-        let tampered = b"pada-1 smoke test message!";
+        let tampered = b"P-KAIDO smoke test message!";
         assert!(!verify(variant, &kp.pk_bytes, tampered, &sig).expect("verify should not error"));
     }
 

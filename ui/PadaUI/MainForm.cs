@@ -27,7 +27,7 @@ internal sealed class MainForm : Form
     {
         [("ML-DSA", "Keygen")] =
         [
-            new FieldSpec("out-dir", "Output folder (optional — defaults inside pada-1/keys)", FieldKind.OutputFolder, Required: false),
+            new FieldSpec("out-dir", "Output folder (optional — defaults inside P-KAIDO/keys)", FieldKind.OutputFolder, Required: false),
         ],
         [("ML-DSA", "Sign")] =
         [
@@ -44,7 +44,7 @@ internal sealed class MainForm : Form
         ],
         [("ML-KEM", "Keygen")] =
         [
-            new FieldSpec("out-dir", "Output folder (optional — defaults inside pada-1/keys)", FieldKind.OutputFolder, Required: false),
+            new FieldSpec("out-dir", "Output folder (optional — defaults inside P-KAIDO/keys)", FieldKind.OutputFolder, Required: false),
         ],
         [("ML-KEM", "Encapsulate")] =
         [
@@ -75,7 +75,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "pada-1";
+        Text = "P-KAIDO";
         Width = 900;
         Height = 700;
         StartPosition = FormStartPosition.CenterScreen;
@@ -405,7 +405,7 @@ internal sealed class MainForm : Form
     {
         if (string.IsNullOrWhiteSpace(_cliPathBox.Text))
         {
-            MessageBox.Show(this, "Set the path to pqc-cli.exe first.", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Set the path to pqc-cli.exe first.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -436,7 +436,7 @@ internal sealed class MainForm : Form
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Couldn't create '{folder}':\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"Couldn't create '{folder}':\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -461,7 +461,7 @@ internal sealed class MainForm : Form
 
             if (skBox is null || string.IsNullOrWhiteSpace(skBox.Text))
             {
-                MessageBox.Show(this, "'Signing key (sk)' is required.", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "'Signing key (sk)' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -475,7 +475,7 @@ internal sealed class MainForm : Form
                     hasFile
                         ? "Provide either a file to sign or typed text — not both."
                         : "Nothing to sign. Pick a file, or type text in the box below.",
-                    "pada-1",
+                    "P-KAIDO",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
@@ -497,7 +497,7 @@ internal sealed class MainForm : Form
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(this, $"Couldn't save typed text:\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this, $"Couldn't save typed text:\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
             }
@@ -516,7 +516,7 @@ internal sealed class MainForm : Form
             {
                 if (spec.Required && string.IsNullOrWhiteSpace(box.Text))
                 {
-                    MessageBox.Show(this, $"'{spec.Label}' is required.", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, $"'{spec.Label}' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
             }
@@ -538,7 +538,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Failed to launch pqc-cli:\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, $"Failed to launch pqc-cli:\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
@@ -619,7 +619,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Couldn't read '{path}':\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, $"Couldn't read '{path}':\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
