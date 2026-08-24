@@ -166,6 +166,8 @@ fn dsa_keygen(args: DsaKeygenArgs) -> Result<serde_json::Value, String> {
         "pk_path": path_str(&args.pk_out),
         "sk_bytes": kp.sk_seed.len(),
         "pk_bytes": kp.pk_bytes.len(),
+        "sk_hex": hex_encode(&kp.sk_seed),
+        "pk_hex": hex_encode(&kp.pk_bytes),
     }))
 }
 
@@ -189,6 +191,7 @@ fn dsa_sign(args: DsaSignArgs) -> Result<serde_json::Value, String> {
         "file": path_str(&args.file),
         "signature_path": path_str(&sig_out),
         "signature_bytes": signature.len(),
+        "signature_hex": hex_encode(&signature),
     }))
 }
 
@@ -208,6 +211,8 @@ fn dsa_verify(args: DsaVerifyArgs) -> Result<serde_json::Value, String> {
         "file": path_str(&args.file),
         "signature_path": path_str(&args.sig),
         "valid": valid,
+        "pk_hex": hex_encode(&pk_bytes),
+        "signature_hex": hex_encode(&signature),
     }))
 }
 
@@ -227,6 +232,8 @@ fn kem_keygen(args: KemKeygenArgs) -> Result<serde_json::Value, String> {
         "pk_path": path_str(&args.pk_out),
         "sk_bytes": kp.sk_seed.len(),
         "pk_bytes": kp.pk_bytes.len(),
+        "sk_hex": hex_encode(&kp.sk_seed),
+        "pk_hex": hex_encode(&kp.pk_bytes),
     }))
 }
 
@@ -249,6 +256,7 @@ fn kem_encapsulate(args: EncapsulateArgs) -> Result<serde_json::Value, String> {
         "public_key_path": path_str(&args.pk),
         "ciphertext_path": path_str(&args.ct_out),
         "ciphertext_bytes": result.ciphertext.len(),
+        "ciphertext_hex": hex_encode(&result.ciphertext),
         "shared_secret_hex": hex_encode(&result.shared_secret),
         "shared_secret_path": args.ss_out.as_deref().map(path_str),
     }))
@@ -272,6 +280,7 @@ fn kem_decapsulate(args: DecapsulateArgs) -> Result<serde_json::Value, String> {
         "variant": variant.as_str(),
         "secret_key_path": path_str(&args.sk),
         "ciphertext_path": path_str(&args.ct),
+        "ciphertext_hex": hex_encode(&ciphertext),
         "shared_secret_hex": hex_encode(&shared_secret),
         "shared_secret_path": args.ss_out.as_deref().map(path_str),
     }))
