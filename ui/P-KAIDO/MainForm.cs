@@ -84,7 +84,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 8,
+            RowCount = 9,
             Padding = new Padding(10),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // cli path
@@ -95,6 +95,7 @@ internal sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // drop-a-file-to-inspect zone
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // results grid — takes all remaining space
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); // JSON detail — fixed, small
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // footer
         Controls.Add(root);
 
         // --- CLI path row ---
@@ -244,6 +245,18 @@ internal sealed class MainForm : Form
             Font = new Font(FontFamily.GenericMonospace, 9),
         };
         root.Controls.Add(_detailBox, 0, 7);
+
+        // --- Footer ---
+        var footerLabel = new Label
+        {
+            Text = "post kuantum algoritma işlem deney ortamı",
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = SystemColors.GrayText,
+            Padding = new Padding(0, 6, 0, 0),
+        };
+        root.Controls.Add(footerLabel, 0, 8);
 
         _schemeBox.SelectedIndex = 0;
     }
