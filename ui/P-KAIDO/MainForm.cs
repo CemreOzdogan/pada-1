@@ -49,7 +49,7 @@ internal sealed class MainForm : Form
         [("ML-KEM", "Encapsulate")] =
         [
             new FieldSpec("pk", "Public key (pk)", FieldKind.InputFile, Required: true),
-            new FieldSpec("ct-out", "Ciphertext out", FieldKind.OutputFile, Required: true),
+            new FieldSpec("ct-out", "Ciphertext out (optional — defaults inside P-KAIDO/keys)", FieldKind.OutputFile, Required: false),
             new FieldSpec("ss-out", "Shared secret out (optional)", FieldKind.OutputFile, Required: false),
         ],
         [("ML-KEM", "Decapsulate")] =
@@ -523,6 +523,47 @@ internal sealed class MainForm : Form
                 args.Add(sigOutBox.Text);
             }
         }
+        else if (op == "Encapsulate")
+        {
+            TextBox? pkBox = null, ctOutBox = null, ssOutBox = null;
+            foreach (var (box, spec) in _currentFields)
+            {
+                switch (spec.ArgName)
+                {
+                    case "pk": pkBox = box; break;
+                    case "ct-out": ctOutBox = box; break;
+                    case "ss-out": ssOutBox = box; break;
+                }
+            }
+
+            if (pkBox is null || string.IsNullOrWhiteSpace(pkBox.Text))
+            {
+                MessageBox.Show(this, "'Public key (pk)' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            args.Add("--pk");
+            args.Add(pkBox.Text);
+
+            string ctOutPath = ResolveCiphertextPath(ctOutBox?.Text, variant);
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ctOutPath)!);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Couldn't create output folder for '{ctOutPath}':\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            args.Add("--ct-out");
+            args.Add(ctOutPath);
+
+            if (ssOutBox is not null && !string.IsNullOrWhiteSpace(ssOutBox.Text))
+            {
+                args.Add("--ss-out");
+                args.Add(ssOutBox.Text);
+            }
+        }
         else
         {
             foreach (var (box, spec) in _currentFields)
@@ -694,6 +735,17 @@ internal sealed class MainForm : Form
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         return Path.Combine(FindRepoRoot(), "keys", $"{stamp}_{variant}");
+    }
+
+    private static string ResolveCiphertextPath(string? requestedPath, string variant)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedPath))
+        {
+            return requestedPath;
+        }
+
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        return Path.Combine(FindRepoRoot(), "keys", $"{stamp}_{variant}-ct.bin");
     }
 
     private static string WriteTypedMessage(string text, string variant)
