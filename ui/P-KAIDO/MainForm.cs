@@ -72,7 +72,7 @@ internal sealed class MainForm : Form
     private readonly List<(TextBox Box, FieldSpec Spec)> _currentFields = [];
     private readonly BindingList<RunRow> _rows = [];
 
-    private sealed record RunRow(string Time, string Scheme, string Op, string Variant, bool Ok, string Duration, string Summary, string RawJson);
+    private sealed record RunRow(string Time, string Scheme, string Op, string Variant, string Engine, bool Ok, string Duration, string Summary, string RawJson);
 
     public MainForm()
     {
@@ -254,6 +254,7 @@ internal sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Scheme", DataPropertyName = nameof(RunRow.Scheme), Width = 70 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Op", DataPropertyName = nameof(RunRow.Op), Width = 80 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Variant", DataPropertyName = nameof(RunRow.Variant), Width = 90 });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Engine", DataPropertyName = nameof(RunRow.Engine), Width = 80 });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "OK", DataPropertyName = nameof(RunRow.Ok), Width = 40 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration", DataPropertyName = nameof(RunRow.Duration), Width = 80 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
@@ -644,7 +645,7 @@ internal sealed class MainForm : Form
         }
 
         string duration = FormatDuration(result.Elapsed);
-        _rows.Insert(0, new RunRow(DateTime.Now.ToString("HH:mm:ss"), scheme, op, variant, ok, duration, summary, rawJson));
+        _rows.Insert(0, new RunRow(DateTime.Now.ToString("HH:mm:ss"), scheme, op, variant, engine, ok, duration, summary, rawJson));
         if (_grid.Rows.Count > 0)
         {
             _grid.ClearSelection();
@@ -721,6 +722,7 @@ internal sealed class MainForm : Form
             DateTime.Now.ToString("HH:mm:ss"),
             "-",
             "Inspect",
+            "-",
             "-",
             true,
             "-",
