@@ -75,7 +75,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "pada-1 — ML-KEM / ML-DSA";
+        Text = "pada-1";
         Width = 900;
         Height = 700;
         StartPosition = FormStartPosition.CenterScreen;
@@ -84,7 +84,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 8,
             Padding = new Padding(10),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // cli path
@@ -92,6 +92,7 @@ internal sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // variant
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // operation
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // dynamic fields + run button
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // drop-a-file-to-inspect zone
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // results grid — takes all remaining space
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); // JSON detail — fixed, small
         Controls.Add(root);
@@ -179,6 +180,38 @@ internal sealed class MainForm : Form
         fieldsGroup.Controls.Add(runRow, 0, 1);
         root.Controls.Add(fieldsGroup, 0, 4);
 
+        // --- Drop a file here to view its hex, no need to run it through an operation ---
+        var inspectZone = new Label
+        {
+            Text = "Drop a file here to view its hex (or click to browse)",
+            Dock = DockStyle.Fill,
+            Height = 32,
+            TextAlign = ContentAlignment.MiddleCenter,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = SystemColors.ControlLightLight,
+            Cursor = Cursors.Hand,
+            AllowDrop = true,
+            Margin = new Padding(0, 4, 0, 4),
+        };
+        inspectZone.DragEnter += (_, e) =>
+        {
+            e.Effect = e.Data is not null && e.Data.GetDataPresent(DataFormats.FileDrop)
+                ? DragDropEffects.Copy
+                : DragDropEffects.None;
+        };
+        inspectZone.DragDrop += (_, e) =>
+        {
+            if (e.Data?.GetData(DataFormats.FileDrop) is string[] paths)
+            {
+                foreach (var path in paths)
+                {
+                    InspectFile(path);
+                }
+            }
+        };
+        inspectZone.Click += (_, _) => BrowseAndInspectFile();
+        root.Controls.Add(inspectZone, 0, 5);
+
         // --- Results grid ---
         _grid = new DataGridView
         {
@@ -199,7 +232,7 @@ internal sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
         _grid.DataSource = _rows;
         _grid.SelectionChanged += (_, _) => OnGridSelectionChanged();
-        root.Controls.Add(_grid, 0, 5);
+        root.Controls.Add(_grid, 0, 6);
 
         // --- Detail box ---
         _detailBox = new TextBox
@@ -210,7 +243,7 @@ internal sealed class MainForm : Form
             ScrollBars = ScrollBars.Vertical,
             Font = new Font(FontFamily.GenericMonospace, 9),
         };
-        root.Controls.Add(_detailBox, 0, 6);
+        root.Controls.Add(_detailBox, 0, 7);
 
         _schemeBox.SelectedIndex = 0;
     }
@@ -563,6 +596,58 @@ internal sealed class MainForm : Form
         }
 
         return "ok";
+    }
+
+    private void BrowseAndInspectFile()
+    {
+        using var dialog = new OpenFileDialog { Filter = "All files|*.*", Multiselect = true };
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            foreach (var path in dialog.FileNames)
+            {
+                InspectFile(path);
+            }
+        }
+    }
+
+    private void InspectFile(string path)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Couldn't read '{path}':\n{ex.Message}", "pada-1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var json = JsonSerializer.Serialize(new
+        {
+            ok = true,
+            op = "inspect",
+            file = path,
+            bytes = bytes.Length,
+            hex = Convert.ToHexString(bytes).ToLowerInvariant(),
+        });
+
+        var row = new RunRow(
+            DateTime.Now.ToString("HH:mm:ss"),
+            "-",
+            "Inspect",
+            "-",
+            true,
+            "-",
+            $"{Path.GetFileName(path)} ({bytes.Length} bytes)",
+            json);
+
+        _rows.Insert(0, row);
+        if (_grid.Rows.Count > 0)
+        {
+            _grid.ClearSelection();
+            _grid.Rows[0].Selected = true;
+        }
     }
 
     private void OnGridSelectionChanged()
