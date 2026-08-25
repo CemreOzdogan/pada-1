@@ -319,17 +319,27 @@ internal sealed class MainForm : Form
             ReadOnly = true,
             ScrollBars = ScrollBars.Vertical,
             Font = new Font(FontFamily.GenericMonospace, 9),
-            Margin = new Padding(8, 0, 0, 0),
         };
 
-        // --- Results row: grid on the left, JSON detail on the right so both stay visible at once ---
-        var resultsSplit = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        resultsSplit.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        resultsSplit.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320));
-        resultsSplit.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        resultsSplit.Controls.Add(_grid, 0, 0);
-        resultsSplit.Controls.Add(_detailBox, 1, 0);
+        // --- Results row: grid on the left, JSON detail on the right, draggable splitter between them ---
+        var resultsSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            SplitterWidth = 6,
+        };
+        resultsSplit.Panel1.Controls.Add(_grid);
+        resultsSplit.Panel2.Controls.Add(_detailBox);
         root.Controls.Add(resultsSplit, 0, 7);
+        // Panel min sizes and SplitterDistance can't be set reliably until the control has its
+        // real, laid-out width (it's still the default 150x150 stub during construction).
+        Load += (_, _) =>
+        {
+            resultsSplit.Panel1MinSize = 300;
+            resultsSplit.Panel2MinSize = 200;
+            resultsSplit.FixedPanel = FixedPanel.Panel2;
+            resultsSplit.SplitterDistance = Math.Max(resultsSplit.Panel1MinSize, resultsSplit.Width - 320 - resultsSplit.SplitterWidth);
+        };
 
         // --- Footer ---
         var footerLabel = new Label
