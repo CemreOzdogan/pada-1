@@ -7,6 +7,18 @@ namespace PKaido;
 
 internal sealed class MainForm : Form
 {
+    // Kaido-inspired palette: near-black indigo, azure dragon-scale blue, gold horns/eyes as the warm accent.
+    private static readonly Color BgColor = ColorTranslator.FromHtml("#14141C");
+    private static readonly Color PanelColor = ColorTranslator.FromHtml("#1F2233");
+    private static readonly Color InputBgColor = ColorTranslator.FromHtml("#161A24");
+    private static readonly Color BorderColor = ColorTranslator.FromHtml("#3A4160");
+    private static readonly Color TextColor = ColorTranslator.FromHtml("#E8E6DE");
+    private static readonly Color SecondaryTextColor = ColorTranslator.FromHtml("#8891A8");
+    private static readonly Color AccentColor = ColorTranslator.FromHtml("#2E7FD9");
+    private static readonly Color AccentHoverColor = ColorTranslator.FromHtml("#4FA3F5");
+    private static readonly Color GoldColor = ColorTranslator.FromHtml("#D4A94E");
+    private static readonly Color ErrorColor = ColorTranslator.FromHtml("#C23B3B");
+
     private enum FieldKind { InputFile, OutputFile, OutputFolder, TextMessage }
 
     private sealed record FieldSpec(string ArgName, string Label, FieldKind Kind, bool Required);
@@ -189,6 +201,11 @@ internal sealed class MainForm : Form
         _fieldsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         var runButton = new Button { Text = "Run", Width = 100, Height = 32, Anchor = AnchorStyles.Right };
+        runButton.FlatStyle = FlatStyle.Flat;
+        runButton.BackColor = AccentColor;
+        runButton.ForeColor = TextColor;
+        runButton.FlatAppearance.BorderColor = AccentHoverColor;
+        runButton.FlatAppearance.MouseOverBackColor = AccentHoverColor;
         runButton.Click += (_, _) => RunClicked();
         var runRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
         runRow.Controls.Add(runButton);
@@ -215,7 +232,8 @@ internal sealed class MainForm : Form
             Height = 32,
             TextAlign = ContentAlignment.MiddleCenter,
             BorderStyle = BorderStyle.FixedSingle,
-            BackColor = SystemColors.ControlLightLight,
+            BackColor = PanelColor,
+            ForeColor = SecondaryTextColor,
             Cursor = Cursors.Hand,
             AllowDrop = true,
             Margin = new Padding(0, 4, 0, 4),
@@ -257,7 +275,40 @@ internal sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Engine", DataPropertyName = nameof(RunRow.Engine), Width = 80 });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "OK", DataPropertyName = nameof(RunRow.Ok), Width = 40 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration", DataPropertyName = nameof(RunRow.Duration), Width = 80 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        var summaryColumn = new DataGridViewTextBoxColumn { HeaderText = "Summary", DataPropertyName = nameof(RunRow.Summary), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill };
+        _grid.Columns.Add(summaryColumn);
+
+        _grid.BackgroundColor = PanelColor;
+        _grid.GridColor = BorderColor;
+        _grid.BorderStyle = BorderStyle.FixedSingle;
+        _grid.EnableHeadersVisualStyles = false;
+        _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = BgColor,
+            ForeColor = TextColor,
+            SelectionBackColor = BgColor,
+            SelectionForeColor = TextColor,
+        };
+        _grid.DefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = PanelColor,
+            ForeColor = TextColor,
+            SelectionBackColor = AccentColor,
+            SelectionForeColor = TextColor,
+        };
+        _grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle { BackColor = InputBgColor };
+        _grid.RowHeadersDefaultCellStyle.SelectionBackColor = BgColor;
+
+        _grid.CellFormatting += (_, e) =>
+        {
+            if (e.ColumnIndex != summaryColumn.Index || _grid.Rows[e.RowIndex].DataBoundItem is not RunRow row)
+            {
+                return;
+            }
+
+            e.CellStyle!.ForeColor = row.Ok ? GoldColor : ErrorColor;
+        };
+
         _grid.DataSource = _rows;
         _grid.SelectionChanged += (_, _) => OnGridSelectionChanged();
         root.Controls.Add(_grid, 0, 7);
@@ -280,10 +331,14 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             AutoSize = true,
             TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = SystemColors.GrayText,
+            ForeColor = SecondaryTextColor,
             Padding = new Padding(0, 6, 0, 0),
         };
         root.Controls.Add(footerLabel, 0, 9);
+
+        BackColor = BgColor;
+        ForeColor = TextColor;
+        ThemeTree(this);
 
         _schemeBox.SelectedIndex = 0;
     }
@@ -296,13 +351,15 @@ internal sealed class MainForm : Form
         var variants = VariantsByScheme[scheme];
         for (int i = 0; i < variants.Length; i++)
         {
-            _variantPanel.Controls.Add(new RadioButton
+            var radio = new RadioButton
             {
                 Text = variants[i],
                 AutoSize = true,
                 Checked = i == 0,
                 Margin = new Padding(0, 4, 16, 4),
-            });
+            };
+            ThemeControl(radio);
+            _variantPanel.Controls.Add(radio);
         }
 
         _operationPanel.Controls.Clear();
@@ -323,6 +380,7 @@ internal sealed class MainForm : Form
                     OnOperationChanged();
                 }
             };
+            ThemeControl(radio);
             _operationPanel.Controls.Add(radio);
         }
 
@@ -363,13 +421,15 @@ internal sealed class MainForm : Form
             _fieldsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _fieldsPanel.RowCount++;
 
-            _fieldsPanel.Controls.Add(new Label
+            var label = new Label
             {
                 Text = spec.Label + (spec.Required ? " *" : ""),
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
                 Padding = new Padding(0, 6, 6, 0),
-            }, 0, i);
+            };
+            ThemeControl(label);
+            _fieldsPanel.Controls.Add(label, 0, i);
 
             TextBox box;
             if (spec.Kind == FieldKind.TextMessage)
@@ -386,6 +446,7 @@ internal sealed class MainForm : Form
             {
                 box = new TextBox { Dock = DockStyle.Fill };
             }
+            ThemeControl(box);
             _fieldsPanel.Controls.Add(box, 1, i);
 
             if (spec.Kind != FieldKind.TextMessage)
@@ -393,6 +454,7 @@ internal sealed class MainForm : Form
                 var browse = new Button { Text = "Browse...", AutoSize = true };
                 var capturedSpec = spec;
                 browse.Click += (_, _) => BrowseForField(box, capturedSpec);
+                ThemeControl(browse);
                 _fieldsPanel.Controls.Add(browse, 2, i);
             }
 
@@ -804,6 +866,58 @@ internal sealed class MainForm : Form
         }
 
         return AppContext.BaseDirectory;
+    }
+
+    // Applies the palette to one control based on its runtime type. Called both for the static
+    // control tree (via ThemeTree) and at each dynamic control's creation site (scheme/operation
+    // change rebuilds radio buttons and fields at runtime, so a one-time tree walk isn't enough).
+    private static void ThemeControl(Control control)
+    {
+        switch (control)
+        {
+            case Button button:
+                button.FlatStyle = FlatStyle.Flat;
+                button.BackColor = PanelColor;
+                button.ForeColor = TextColor;
+                button.FlatAppearance.BorderColor = BorderColor;
+                button.FlatAppearance.MouseOverBackColor = BorderColor;
+                break;
+            case TextBox textBox:
+                textBox.BackColor = InputBgColor;
+                textBox.ForeColor = TextColor;
+                textBox.BorderStyle = BorderStyle.FixedSingle;
+                break;
+            case ComboBox comboBox:
+                comboBox.FlatStyle = FlatStyle.Flat;
+                comboBox.BackColor = InputBgColor;
+                comboBox.ForeColor = TextColor;
+                break;
+            case RadioButton radioButton:
+                radioButton.ForeColor = TextColor;
+                radioButton.BackColor = Color.Transparent;
+                break;
+            case Label label:
+                label.ForeColor = TextColor;
+                break;
+            case DataGridView:
+                break; // themed separately in the constructor — needs header/cell style, not just colors
+            default:
+                control.BackColor = BgColor;
+                control.ForeColor = TextColor;
+                break;
+        }
+    }
+
+    private static void ThemeTree(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            ThemeControl(child);
+            if (child.HasChildren)
+            {
+                ThemeTree(child);
+            }
+        }
     }
 
     private static string? FindDefaultCliPath()
