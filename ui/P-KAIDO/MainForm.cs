@@ -89,7 +89,7 @@ internal sealed class MainForm : Form
     public MainForm()
     {
         Text = "P-KAIDO";
-        Width = 900;
+        Width = 1180;
         Height = 700;
         StartPosition = FormStartPosition.CenterScreen;
 
@@ -97,7 +97,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 10,
+            RowCount = 9,
             Padding = new Padding(10),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // cli path
@@ -107,8 +107,7 @@ internal sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // operation
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // dynamic fields + run button
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // drop-a-file-to-inspect zone
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // results grid — takes all remaining space
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); // JSON detail — fixed, small
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // results grid + JSON detail, side by side — takes all remaining space
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // footer
         Controls.Add(root);
 
@@ -311,7 +310,6 @@ internal sealed class MainForm : Form
 
         _grid.DataSource = _rows;
         _grid.SelectionChanged += (_, _) => OnGridSelectionChanged();
-        root.Controls.Add(_grid, 0, 7);
 
         // --- Detail box ---
         _detailBox = new TextBox
@@ -321,8 +319,17 @@ internal sealed class MainForm : Form
             ReadOnly = true,
             ScrollBars = ScrollBars.Vertical,
             Font = new Font(FontFamily.GenericMonospace, 9),
+            Margin = new Padding(8, 0, 0, 0),
         };
-        root.Controls.Add(_detailBox, 0, 8);
+
+        // --- Results row: grid on the left, JSON detail on the right so both stay visible at once ---
+        var resultsSplit = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        resultsSplit.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        resultsSplit.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320));
+        resultsSplit.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        resultsSplit.Controls.Add(_grid, 0, 0);
+        resultsSplit.Controls.Add(_detailBox, 1, 0);
+        root.Controls.Add(resultsSplit, 0, 7);
 
         // --- Footer ---
         var footerLabel = new Label
@@ -334,7 +341,7 @@ internal sealed class MainForm : Form
             ForeColor = SecondaryTextColor,
             Padding = new Padding(0, 6, 0, 0),
         };
-        root.Controls.Add(footerLabel, 0, 9);
+        root.Controls.Add(footerLabel, 0, 8);
 
         BackColor = BgColor;
         ForeColor = TextColor;
