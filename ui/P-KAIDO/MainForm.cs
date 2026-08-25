@@ -74,9 +74,9 @@ internal sealed class MainForm : Form
 
     private readonly TextBox _cliPathBox;
     private readonly ComboBox _schemeBox;
-    private readonly FlowLayoutPanel _enginePanel;
-    private readonly FlowLayoutPanel _variantPanel;
-    private readonly FlowLayoutPanel _operationPanel;
+    private readonly ComboBox _engineBox;
+    private readonly ComboBox _variantBox;
+    private readonly ComboBox _operationBox;
     private readonly TableLayoutPanel _fieldsPanel;
     private readonly DataGridView _grid;
     private readonly TextBox _detailBox;
@@ -97,14 +97,11 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 9,
+            RowCount = 6,
             Padding = new Padding(10),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // cli path
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // scheme
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // engine
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // variant
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // operation
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // scheme / engine / variant / operation
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // dynamic fields + run button
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // drop-a-file-to-inspect zone
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // results grid + JSON detail, side by side — takes all remaining space
@@ -124,64 +121,30 @@ internal sealed class MainForm : Form
         cliRow.Controls.Add(browseCliButton, 2, 0);
         root.Controls.Add(cliRow, 0, 0);
 
-        // --- Scheme row ---
-        var schemeRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
-        schemeRow.Controls.Add(new Label { Text = "Scheme:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
-        _schemeBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+        // --- Scheme / Engine / Variant / Operation, all as dropdowns in one row ---
+        var optionsRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 8, AutoSize = true };
+        optionsRow.Controls.Add(new Label { Text = "Scheme:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) }, 0, 0);
+        _schemeBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100, Margin = new Padding(3, 3, 16, 3) };
         _schemeBox.Items.AddRange(["ML-DSA", "ML-KEM"]);
         _schemeBox.SelectedIndexChanged += (_, _) => OnSchemeChanged();
-        schemeRow.Controls.Add(_schemeBox);
-        root.Controls.Add(schemeRow, 0, 1);
+        optionsRow.Controls.Add(_schemeBox, 1, 0);
 
-        // --- Engine row: which crypto backend to use (RustCrypto or libcrux) ---
-        var engineRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
-        engineRow.Controls.Add(new Label { Text = "Engine:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
-        _enginePanel = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-        };
-        string[] engines = ["rustcrypto", "libcrux"];
-        for (int i = 0; i < engines.Length; i++)
-        {
-            _enginePanel.Controls.Add(new RadioButton
-            {
-                Text = engines[i],
-                AutoSize = true,
-                Checked = i == 0,
-                Margin = new Padding(0, 4, 16, 4),
-            });
-        }
-        engineRow.Controls.Add(_enginePanel);
-        root.Controls.Add(engineRow, 0, 2);
+        optionsRow.Controls.Add(new Label { Text = "Engine:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) }, 2, 0);
+        _engineBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, Margin = new Padding(3, 3, 16, 3) };
+        _engineBox.Items.AddRange(["rustcrypto", "libcrux"]);
+        _engineBox.SelectedIndex = 0;
+        optionsRow.Controls.Add(_engineBox, 3, 0);
 
-        // --- Variant row: all options shown at once, no dropdown/scrolling ---
-        var variantRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
-        variantRow.Controls.Add(new Label { Text = "Variant:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
-        _variantPanel = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-        };
-        variantRow.Controls.Add(_variantPanel);
-        root.Controls.Add(variantRow, 0, 3);
+        optionsRow.Controls.Add(new Label { Text = "Variant:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) }, 4, 0);
+        _variantBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120, Margin = new Padding(3, 3, 16, 3) };
+        optionsRow.Controls.Add(_variantBox, 5, 0);
 
-        // --- Operation row: all options shown at once, no dropdown/scrolling ---
-        var operationRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
-        operationRow.Controls.Add(new Label { Text = "Operation:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) });
-        _operationPanel = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-        };
-        operationRow.Controls.Add(_operationPanel);
-        root.Controls.Add(operationRow, 0, 4);
+        optionsRow.Controls.Add(new Label { Text = "Operation:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) }, 6, 0);
+        _operationBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120, Margin = new Padding(3, 3, 0, 3) };
+        _operationBox.SelectedIndexChanged += (_, _) => OnOperationChanged();
+        optionsRow.Controls.Add(_operationBox, 7, 0);
+
+        root.Controls.Add(optionsRow, 0, 1);
 
         // --- Dynamic file fields ---
         // Every field must always be fully visible — no internal scrollbar. Plain Panels with
@@ -221,7 +184,7 @@ internal sealed class MainForm : Form
         fieldsGroup.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         fieldsGroup.Controls.Add(_fieldsPanel, 0, 0);
         fieldsGroup.Controls.Add(runRow, 0, 1);
-        root.Controls.Add(fieldsGroup, 0, 5);
+        root.Controls.Add(fieldsGroup, 0, 2);
 
         // --- Drop a file here to view its hex, no need to run it through an operation ---
         var inspectZone = new Label
@@ -254,7 +217,7 @@ internal sealed class MainForm : Form
             }
         };
         inspectZone.Click += (_, _) => BrowseAndInspectFile();
-        root.Controls.Add(inspectZone, 0, 6);
+        root.Controls.Add(inspectZone, 0, 3);
 
         // --- Results grid ---
         _grid = new DataGridView
@@ -330,7 +293,7 @@ internal sealed class MainForm : Form
         };
         resultsSplit.Panel1.Controls.Add(_grid);
         resultsSplit.Panel2.Controls.Add(_detailBox);
-        root.Controls.Add(resultsSplit, 0, 7);
+        root.Controls.Add(resultsSplit, 0, 4);
         // Panel min sizes and SplitterDistance can't be set reliably until the control has its
         // real, laid-out width (it's still the default 150x150 stub during construction).
         Load += (_, _) =>
@@ -351,7 +314,7 @@ internal sealed class MainForm : Form
             ForeColor = SecondaryTextColor,
             Padding = new Padding(0, 6, 0, 0),
         };
-        root.Controls.Add(footerLabel, 0, 8);
+        root.Controls.Add(footerLabel, 0, 5);
 
         BackColor = BgColor;
         ForeColor = TextColor;
@@ -364,60 +327,22 @@ internal sealed class MainForm : Form
     {
         var scheme = (string)_schemeBox.SelectedItem!;
 
-        _variantPanel.Controls.Clear();
-        var variants = VariantsByScheme[scheme];
-        for (int i = 0; i < variants.Length; i++)
-        {
-            var radio = new RadioButton
-            {
-                Text = variants[i],
-                AutoSize = true,
-                Checked = i == 0,
-                Margin = new Padding(0, 4, 16, 4),
-            };
-            ThemeControl(radio);
-            _variantPanel.Controls.Add(radio);
-        }
+        _variantBox.Items.Clear();
+        _variantBox.Items.AddRange(VariantsByScheme[scheme]);
+        _variantBox.SelectedIndex = 0;
 
-        _operationPanel.Controls.Clear();
-        var operations = OperationsByScheme[scheme];
-        for (int i = 0; i < operations.Length; i++)
-        {
-            var radio = new RadioButton
-            {
-                Text = operations[i],
-                AutoSize = true,
-                Checked = i == 0,
-                Margin = new Padding(0, 4, 16, 4),
-            };
-            radio.CheckedChanged += (sender, _) =>
-            {
-                if (((RadioButton)sender!).Checked)
-                {
-                    OnOperationChanged();
-                }
-            };
-            ThemeControl(radio);
-            _operationPanel.Controls.Add(radio);
-        }
-
-        OnOperationChanged();
+        // Clearing Items resets SelectedIndex to -1, so setting it to 0 always changes it and
+        // fires SelectedIndexChanged — that's what drives OnOperationChanged for this scheme.
+        _operationBox.Items.Clear();
+        _operationBox.Items.AddRange(OperationsByScheme[scheme]);
+        _operationBox.SelectedIndex = 0;
     }
 
-    private string? GetSelectedVariant() =>
-        _variantPanel.Controls
-            .OfType<RadioButton>()
-            .FirstOrDefault(r => r.Checked)?.Text;
+    private string? GetSelectedVariant() => _variantBox.SelectedItem as string;
 
-    private string? GetSelectedOperation() =>
-        _operationPanel.Controls
-            .OfType<RadioButton>()
-            .FirstOrDefault(r => r.Checked)?.Text;
+    private string? GetSelectedOperation() => _operationBox.SelectedItem as string;
 
-    private string? GetSelectedEngine() =>
-        _enginePanel.Controls
-            .OfType<RadioButton>()
-            .FirstOrDefault(r => r.Checked)?.Text;
+    private string? GetSelectedEngine() => _engineBox.SelectedItem as string;
 
     private void OnOperationChanged()
     {
