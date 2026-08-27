@@ -453,18 +453,17 @@ internal sealed class MainForm : Form
         }
 
         // ML-DSA custom Keygen only: optional fault-injection fields. Each is 64 hex chars (32
-        // bytes) or blank; blank means "derive normally". "seed" replaces the OS-random master
-        // seed; rho/k-seed/sigma each bypass SHAKE256(seed, nonce) for that one value entirely,
-        // e.g. handing ExpandA an arbitrary matrix A that was never actually derived from seed.
+        // bytes) or blank; blank means "derive normally". Labels name both what the field
+        // controls and its FIPS 204 symbol, so it's clear at a glance what changing it does.
         if (scheme == "ML-DSA" && op == "Keygen" && GetSelectedEngine() == "custom")
         {
             specs =
             [
                 .. specs,
-                new FieldSpec("seed", "Seed override (64 hex chars, optional — blank = random)", FieldKind.TextValue, Required: false),
-                new FieldSpec("rho", "rho override (64 hex, optional — skips hashing seed for A)", FieldKind.TextValue, Required: false),
-                new FieldSpec("k-seed", "k_seed override (64 hex, optional)", FieldKind.TextValue, Required: false),
-                new FieldSpec("sigma", "sigma override (64 hex, optional — skips hashing seed for s1/s2 noise)", FieldKind.TextValue, Required: false),
+                new FieldSpec("seed", "Master seed override (64 hex, optional — blank = random; feeds all three below unless they're also overridden)", FieldKind.TextValue, Required: false),
+                new FieldSpec("rho", "Matrix seed override — rho (64 hex, optional — controls the public matrix A)", FieldKind.TextValue, Required: false),
+                new FieldSpec("signing-seed", "Signing seed override — K (64 hex, optional — only affects future signing randomness, not this key's A or noise)", FieldKind.TextValue, Required: false),
+                new FieldSpec("noise-seed", "Noise seed override — rho' (64 hex, optional — controls the s1/s2 secret-key noise)", FieldKind.TextValue, Required: false),
             ];
         }
 
@@ -804,7 +803,7 @@ internal sealed class MainForm : Form
         if (op == "Keygen")
         {
             string? requestedFolder = null;
-            string? seedOverride = null, rhoOverride = null, kSeedOverride = null, sigmaOverride = null;
+            string? seedOverride = null, rhoOverride = null, signingSeedOverride = null, noiseSeedOverride = null;
             foreach (var (box, spec) in _currentFields)
             {
                 switch (spec.ArgName)
@@ -812,12 +811,12 @@ internal sealed class MainForm : Form
                     case "out-dir": requestedFolder = box.Text; break;
                     case "seed": seedOverride = box.Text; break;
                     case "rho": rhoOverride = box.Text; break;
-                    case "k-seed": kSeedOverride = box.Text; break;
-                    case "sigma": sigmaOverride = box.Text; break;
+                    case "signing-seed": signingSeedOverride = box.Text; break;
+                    case "noise-seed": noiseSeedOverride = box.Text; break;
                 }
             }
 
-            foreach (var (label, value) in new[] { ("Seed", seedOverride), ("rho", rhoOverride), ("k_seed", kSeedOverride), ("sigma", sigmaOverride) })
+            foreach (var (label, value) in new[] { ("Master seed", seedOverride), ("Matrix seed (rho)", rhoOverride), ("Signing seed (K)", signingSeedOverride), ("Noise seed (rho')", noiseSeedOverride) })
             {
                 if (!string.IsNullOrWhiteSpace(value) && !IsValidHex32(value))
                 {
@@ -850,8 +849,8 @@ internal sealed class MainForm : Form
             };
             if (!string.IsNullOrWhiteSpace(seedOverride)) { args.Add("--seed"); args.Add(seedOverride.Trim()); }
             if (!string.IsNullOrWhiteSpace(rhoOverride)) { args.Add("--rho"); args.Add(rhoOverride.Trim()); }
-            if (!string.IsNullOrWhiteSpace(kSeedOverride)) { args.Add("--k-seed"); args.Add(kSeedOverride.Trim()); }
-            if (!string.IsNullOrWhiteSpace(sigmaOverride)) { args.Add("--sigma"); args.Add(sigmaOverride.Trim()); }
+            if (!string.IsNullOrWhiteSpace(signingSeedOverride)) { args.Add("--signing-seed"); args.Add(signingSeedOverride.Trim()); }
+            if (!string.IsNullOrWhiteSpace(noiseSeedOverride)) { args.Add("--noise-seed"); args.Add(noiseSeedOverride.Trim()); }
 
             RunCliAndRecord(args, "ML-DSA", op, "custom", "custom");
             return;

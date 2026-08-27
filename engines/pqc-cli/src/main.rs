@@ -147,22 +147,28 @@ struct DsaKeygenCustomArgs {
     /// Where to write the derived parameter set (JSON) — required by sign-custom/verify-custom
     #[arg(long)]
     params_out: PathBuf,
-    /// Override the master 256-bit seed (64 hex chars) instead of drawing one from the OS RNG
+    /// Override the master 256-bit seed (64 hex chars) instead of drawing one from the OS RNG.
+    /// Still gets hashed normally into rho/noise-seed/signing-seed unless those are ALSO
+    /// overridden below.
     #[arg(long)]
     seed: Option<String>,
-    /// Override rho (64 hex chars), bypassing SHAKE256(seed, 0) entirely — feeds an arbitrary
-    /// matrix A into ExpandA instead of one honestly derived from seed. Research/fault-injection
-    /// only: the resulting key is still internally consistent (sign/verify still round-trip),
-    /// it just wasn't derived the normal way.
+    /// Override rho (64 hex chars, FIPS 204's rho), bypassing SHAKE256(seed, 0) entirely — feeds
+    /// an arbitrary matrix A into ExpandA instead of one honestly derived from seed.
+    /// Research/fault-injection only: the resulting key is still internally consistent
+    /// (sign/verify still round-trip), it just wasn't derived the normal way.
     #[arg(long)]
     rho: Option<String>,
-    /// Override k_seed (64 hex chars), bypassing SHAKE256(seed, 1)
+    /// Override the signing seed K (64 hex chars, FIPS 204's K), bypassing SHAKE256(seed, 1).
+    /// Stored in the secret key and used later, at SIGN time, to derive that signature's own
+    /// randomness — has no effect on this keygen run's own matrix A or s1/s2 noise.
     #[arg(long)]
-    k_seed: Option<String>,
-    /// Override sigma (64 hex chars), bypassing SHAKE256(seed, 2) — feeds arbitrary noise into
-    /// the s1/s2 sampling instead of noise honestly derived from seed
+    signing_seed: Option<String>,
+    /// Override the noise seed rho' (64 hex chars, FIPS 204's rho' from keygen — a different
+    /// value from the rho' computed again at sign time), bypassing SHAKE256(seed, 2) — feeds
+    /// arbitrary noise into the s1/s2 secret-key sampling instead of noise honestly derived
+    /// from seed.
     #[arg(long)]
-    sigma: Option<String>,
+    noise_seed: Option<String>,
 }
 
 #[derive(Args)]
@@ -533,8 +539,16 @@ fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, Str
     let xi = args.seed.as_deref().map(|s| parse_hex32(s, "seed")).transpose()?;
     let overrides = pqc_generic::dilithium::KeygenOverrides {
         rho: args.rho.as_deref().map(|s| parse_hex32(s, "rho")).transpose()?,
-        cap_k: args.k_seed.as_deref().map(|s| parse_hex32(s, "k-seed")).transpose()?,
-        rho_prime: args.sigma.as_deref().map(|s| parse_hex32(s, "sigma")).transpose()?,
+        cap_k: args
+            .signing_seed
+            .as_deref()
+            .map(|s| parse_hex32(s, "signing-seed"))
+            .transpose()?,
+        rho_prime: args
+            .noise_seed
+            .as_deref()
+            .map(|s| parse_hex32(s, "noise-seed"))
+            .transpose()?,
     };
 
     let kp = pqc_generic::dsa::keygen_with_overrides(&params, xi, overrides);
@@ -570,12 +584,12 @@ fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, Str
         "pk_hex": hex_encode(&kp.pk_bytes),
         "seed_hex": hex_encode(&kp.xi),
         "rho_hex": hex_encode(&kp.rho),
-        "k_seed_hex": hex_encode(&kp.cap_k),
-        "sigma_hex": hex_encode(&kp.rho_prime),
+        "signing_seed_hex": hex_encode(&kp.cap_k),
+        "noise_seed_hex": hex_encode(&kp.rho_prime),
         "seed_overridden": args.seed.is_some(),
         "rho_overridden": args.rho.is_some(),
-        "k_seed_overridden": args.k_seed.is_some(),
-        "sigma_overridden": args.sigma.is_some(),
+        "signing_seed_overridden": args.signing_seed.is_some(),
+        "noise_seed_overridden": args.noise_seed.is_some(),
     }))
 }
 
