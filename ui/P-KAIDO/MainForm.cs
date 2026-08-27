@@ -20,7 +20,7 @@ internal sealed class MainForm : Form
     internal static readonly Color GoldColor = ColorTranslator.FromHtml("#D4A94E");
     internal static readonly Color ErrorColor = ColorTranslator.FromHtml("#C23B3B");
 
-    private enum FieldKind { InputFile, OutputFile, OutputFolder, TextMessage }
+    private enum FieldKind { InputFile, OutputFile, OutputFolder, TextMessage, TextValue }
 
     private sealed record FieldSpec(string ArgName, string Label, FieldKind Kind, bool Required);
 
@@ -452,6 +452,22 @@ internal sealed class MainForm : Form
             specs = [paramsField, .. specs];
         }
 
+        // ML-DSA custom Keygen only: optional fault-injection fields. Each is 64 hex chars (32
+        // bytes) or blank; blank means "derive normally". "seed" replaces the OS-random master
+        // seed; rho/k-seed/sigma each bypass SHAKE256(seed, nonce) for that one value entirely,
+        // e.g. handing ExpandA an arbitrary matrix A that was never actually derived from seed.
+        if (scheme == "ML-DSA" && op == "Keygen" && GetSelectedEngine() == "custom")
+        {
+            specs =
+            [
+                .. specs,
+                new FieldSpec("seed", "Seed override (64 hex chars, optional — blank = random)", FieldKind.TextValue, Required: false),
+                new FieldSpec("rho", "rho override (64 hex, optional — skips hashing seed for A)", FieldKind.TextValue, Required: false),
+                new FieldSpec("k-seed", "k_seed override (64 hex, optional)", FieldKind.TextValue, Required: false),
+                new FieldSpec("sigma", "sigma override (64 hex, optional — skips hashing seed for s1/s2 noise)", FieldKind.TextValue, Required: false),
+            ];
+        }
+
         for (int i = 0; i < specs.Length; i++)
         {
             var spec = specs[i];
@@ -486,7 +502,7 @@ internal sealed class MainForm : Form
             ThemeControl(box);
             _fieldsPanel.Controls.Add(box, 1, i);
 
-            if (spec.Kind != FieldKind.TextMessage)
+            if (spec.Kind != FieldKind.TextMessage && spec.Kind != FieldKind.TextValue)
             {
                 var browse = new Button { Text = "Browse...", AutoSize = true };
                 var capturedSpec = spec;
@@ -788,11 +804,25 @@ internal sealed class MainForm : Form
         if (op == "Keygen")
         {
             string? requestedFolder = null;
+            string? seedOverride = null, rhoOverride = null, kSeedOverride = null, sigmaOverride = null;
             foreach (var (box, spec) in _currentFields)
             {
-                if (spec.ArgName == "out-dir")
+                switch (spec.ArgName)
                 {
-                    requestedFolder = box.Text;
+                    case "out-dir": requestedFolder = box.Text; break;
+                    case "seed": seedOverride = box.Text; break;
+                    case "rho": rhoOverride = box.Text; break;
+                    case "k-seed": kSeedOverride = box.Text; break;
+                    case "sigma": sigmaOverride = box.Text; break;
+                }
+            }
+
+            foreach (var (label, value) in new[] { ("Seed", seedOverride), ("rho", rhoOverride), ("k_seed", kSeedOverride), ("sigma", sigmaOverride) })
+            {
+                if (!string.IsNullOrWhiteSpace(value) && !IsValidHex32(value))
+                {
+                    MessageBox.Show(this, $"'{label}' override must be exactly 64 hex characters (32 bytes).", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
             }
 
@@ -818,6 +848,11 @@ internal sealed class MainForm : Form
                 "--pk-out", Path.Combine(folder, "custom-pk.bin"),
                 "--params-out", Path.Combine(folder, "custom-params.json"),
             };
+            if (!string.IsNullOrWhiteSpace(seedOverride)) { args.Add("--seed"); args.Add(seedOverride.Trim()); }
+            if (!string.IsNullOrWhiteSpace(rhoOverride)) { args.Add("--rho"); args.Add(rhoOverride.Trim()); }
+            if (!string.IsNullOrWhiteSpace(kSeedOverride)) { args.Add("--k-seed"); args.Add(kSeedOverride.Trim()); }
+            if (!string.IsNullOrWhiteSpace(sigmaOverride)) { args.Add("--sigma"); args.Add(sigmaOverride.Trim()); }
+
             RunCliAndRecord(args, "ML-DSA", op, "custom", "custom");
             return;
         }
@@ -1006,6 +1041,12 @@ internal sealed class MainForm : Form
         }
 
         RunCliAndRecord(decapsArgs, "ML-KEM", op, "custom", "custom");
+    }
+
+    private static bool IsValidHex32(string s)
+    {
+        s = s.Trim();
+        return s.Length == 64 && s.All(Uri.IsHexDigit);
     }
 
     private static string Summarize(JsonElement root, bool ok)

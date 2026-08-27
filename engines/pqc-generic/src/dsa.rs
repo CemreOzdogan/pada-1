@@ -15,14 +15,51 @@ pub struct KeyPair {
     pub pk_bytes: Vec<u8>,
 }
 
+/// `keygen_with_overrides`'s result: the byte-encoded keypair plus every seed actually used
+/// (whether it came from `seed`/an override or was derived), so a caller doing fault-injection
+/// experiments can see and report exactly what fed into `ExpandA`/the noise sampling.
+pub struct KeyPairWithSeeds {
+    pub sk_bytes: Vec<u8>,
+    pub pk_bytes: Vec<u8>,
+    pub seed: [u8; 32],
+    pub rho: [u8; 32],
+    pub k_seed: [u8; 32],
+    pub sigma: [u8; 32],
+}
+
 pub fn keygen(params: &GenericDsaParams) -> KeyPair {
-    let mut seed = [0u8; 32];
-    getrandom::fill(&mut seed).expect("OS RNG failure");
-    let (sk, vk) = dilithium::keygen(params, seed);
+    let kp = keygen_with_overrides(params, None, dilithium::KeygenOverrides::default());
+    KeyPair {
+        sk_bytes: kp.sk_bytes,
+        pk_bytes: kp.pk_bytes,
+    }
+}
+
+/// `seed`: the master 256-bit seed, or `None` to draw one from the OS RNG. `overrides`: lets
+/// any of rho/k_seed/sigma bypass `SHAKE256(seed, nonce)` entirely and use a chosen value
+/// instead — see `dilithium::KeygenOverrides`.
+pub fn keygen_with_overrides(
+    params: &GenericDsaParams,
+    seed: Option<[u8; 32]>,
+    overrides: dilithium::KeygenOverrides,
+) -> KeyPairWithSeeds {
+    let seed = seed.unwrap_or_else(|| {
+        let mut s = [0u8; 32];
+        getrandom::fill(&mut s).expect("OS RNG failure");
+        s
+    });
+    let (sk, vk, resolved) = dilithium::keygen_with_overrides(params, seed, &overrides);
 
     let sk_bytes = encode_sk(&sk.rho, &sk.k_seed, &sk.tr, &sk.s1, &sk.s2, &sk.t, params);
     let pk_bytes = encode_pk(&vk.rho, &vk.t, params);
-    KeyPair { sk_bytes, pk_bytes }
+    KeyPairWithSeeds {
+        sk_bytes,
+        pk_bytes,
+        seed,
+        rho: resolved.rho,
+        k_seed: resolved.k_seed,
+        sigma: resolved.sigma,
+    }
 }
 
 pub fn sign(params: &GenericDsaParams, sk_bytes: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
@@ -180,5 +217,63 @@ mod tests {
     fn roundtrip_custom_params_small_q() {
         let params = build_params(2, 2, 12289, 4096).unwrap();
         roundtrip(&params);
+    }
+
+    #[test]
+    fn same_seed_without_overrides_reproduces_normal_derivation() {
+        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let seed = [7u8; 32];
+
+        let a = keygen_with_overrides(&params, Some(seed), dilithium::KeygenOverrides::default());
+        let b = keygen_with_overrides(&params, Some(seed), dilithium::KeygenOverrides::default());
+
+        assert_eq!(a.rho, b.rho);
+        assert_eq!(a.k_seed, b.k_seed);
+        assert_eq!(a.sigma, b.sigma);
+        assert_eq!(a.pk_bytes, b.pk_bytes, "same seed, no overrides, should be fully deterministic");
+    }
+
+    #[test]
+    fn rho_override_bypasses_derivation_from_seed() {
+        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let seed = [7u8; 32];
+        let faulty_rho = [0xAAu8; 32];
+
+        let normal = keygen_with_overrides(&params, Some(seed), dilithium::KeygenOverrides::default());
+        let faulted = keygen_with_overrides(
+            &params,
+            Some(seed),
+            dilithium::KeygenOverrides {
+                rho: Some(faulty_rho),
+                ..Default::default()
+            },
+        );
+
+        assert_ne!(normal.rho, faulted.rho, "rho override should not match the normally-derived rho");
+        assert_eq!(faulted.rho, faulty_rho, "rho override should be used verbatim");
+        // k_seed/sigma are independent of rho — same seed, no override on those, so they match.
+        assert_eq!(normal.k_seed, faulted.k_seed);
+        assert_eq!(normal.sigma, faulted.sigma);
+        assert_ne!(normal.pk_bytes, faulted.pk_bytes, "a different rho means a different matrix A, hence a different public key");
+    }
+
+    #[test]
+    fn faulted_keypair_is_still_internally_consistent() {
+        // The point of the override is to see how the RESULT changes when A wasn't honestly
+        // derived from seed — not to produce a broken keypair. Sign/verify must still round-trip.
+        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let kp = keygen_with_overrides(
+            &params,
+            Some([1u8; 32]),
+            dilithium::KeygenOverrides {
+                rho: Some([0x42u8; 32]),
+                k_seed: Some([0x43u8; 32]),
+                sigma: Some([0x44u8; 32]),
+            },
+        );
+
+        let msg = b"faulted keygen smoke test";
+        let sig = sign(&params, &kp.sk_bytes, msg).expect("sign should still succeed with a faulted key");
+        assert!(verify(&params, &kp.pk_bytes, msg, &sig).expect("verify should not error"));
     }
 }

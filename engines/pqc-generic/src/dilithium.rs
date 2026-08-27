@@ -101,13 +101,42 @@ fn high_bits_hash_bytes(w1: &[Poly], gamma2: i32, q: i32) -> Vec<u8> {
     encode_poly_vec(w1, bits_for_q(m))
 }
 
+/// Lets the caller substitute any of the three hash-derived keygen seeds with a chosen 32-byte
+/// value, bypassing `derive32(seed, nonce)` for that one — e.g. supplying `rho` directly hands
+/// `ExpandA` an arbitrary matrix A that was never actually derived from `seed` at all. Purely a
+/// research/fault-injection affordance for the custom engine; `None` in every field reproduces
+/// the normal derivation exactly.
+#[derive(Clone, Copy, Default)]
+pub struct KeygenOverrides {
+    pub rho: Option<[u8; 32]>,
+    pub k_seed: Option<[u8; 32]>,
+    pub sigma: Option<[u8; 32]>,
+}
+
 pub fn keygen(params: &GenericDsaParams, seed: [u8; 32]) -> (SigningKey, VerifyingKey) {
+    let (sk, vk, _) = keygen_with_overrides(params, seed, &KeygenOverrides::default());
+    (sk, vk)
+}
+
+/// Resolved seeds are echoed back to the caller (`dsa.rs`) regardless of whether they came from
+/// `seed` or an override, so the CLI can report exactly what was used for a given run.
+pub struct ResolvedSeeds {
+    pub rho: [u8; 32],
+    pub k_seed: [u8; 32],
+    pub sigma: [u8; 32],
+}
+
+pub fn keygen_with_overrides(
+    params: &GenericDsaParams,
+    seed: [u8; 32],
+    overrides: &KeygenOverrides,
+) -> (SigningKey, VerifyingKey, ResolvedSeeds) {
     let table = build_table(params.q).expect("q already validated by dsa_params::build_params");
     let (k, l) = (params.k as usize, params.l as usize);
 
-    let rho = derive32(&seed, 0);
-    let k_seed = derive32(&seed, 1);
-    let sigma = derive32(&seed, 2);
+    let rho = overrides.rho.unwrap_or_else(|| derive32(&seed, 0));
+    let k_seed = overrides.k_seed.unwrap_or_else(|| derive32(&seed, 1));
+    let sigma = overrides.sigma.unwrap_or_else(|| derive32(&seed, 2));
 
     let a = expand_a(&rho, k, l, params.q);
 
@@ -131,6 +160,7 @@ pub fn keygen(params: &GenericDsaParams, seed: [u8; 32]) -> (SigningKey, Verifyi
             t: t.clone(),
         },
         VerifyingKey { rho, t },
+        ResolvedSeeds { rho, k_seed, sigma },
     )
 }
 

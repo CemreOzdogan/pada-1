@@ -147,6 +147,22 @@ struct DsaKeygenCustomArgs {
     /// Where to write the derived parameter set (JSON) — required by sign-custom/verify-custom
     #[arg(long)]
     params_out: PathBuf,
+    /// Override the master 256-bit seed (64 hex chars) instead of drawing one from the OS RNG
+    #[arg(long)]
+    seed: Option<String>,
+    /// Override rho (64 hex chars), bypassing SHAKE256(seed, 0) entirely — feeds an arbitrary
+    /// matrix A into ExpandA instead of one honestly derived from seed. Research/fault-injection
+    /// only: the resulting key is still internally consistent (sign/verify still round-trip),
+    /// it just wasn't derived the normal way.
+    #[arg(long)]
+    rho: Option<String>,
+    /// Override k_seed (64 hex chars), bypassing SHAKE256(seed, 1)
+    #[arg(long)]
+    k_seed: Option<String>,
+    /// Override sigma (64 hex chars), bypassing SHAKE256(seed, 2) — feeds arbitrary noise into
+    /// the s1/s2 sampling instead of noise honestly derived from seed
+    #[arg(long)]
+    sigma: Option<String>,
 }
 
 #[derive(Args)]
@@ -496,9 +512,32 @@ fn load_custom_params(path: &Path) -> Result<pqc_generic::dsa_params::GenericDsa
     })
 }
 
+fn parse_hex32(s: &str, field_name: &str) -> Result<[u8; 32], String> {
+    if s.len() != 64 {
+        return Err(format!(
+            "--{field_name} must be exactly 64 hex characters (32 bytes), got {} characters",
+            s.len()
+        ));
+    }
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        out[i] = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+            .map_err(|_| format!("--{field_name} is not valid hex"))?;
+    }
+    Ok(out)
+}
+
 fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, String> {
     let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1)?;
-    let kp = pqc_generic::dsa::keygen(&params);
+
+    let seed = args.seed.as_deref().map(|s| parse_hex32(s, "seed")).transpose()?;
+    let overrides = pqc_generic::dilithium::KeygenOverrides {
+        rho: args.rho.as_deref().map(|s| parse_hex32(s, "rho")).transpose()?,
+        k_seed: args.k_seed.as_deref().map(|s| parse_hex32(s, "k-seed")).transpose()?,
+        sigma: args.sigma.as_deref().map(|s| parse_hex32(s, "sigma")).transpose()?,
+    };
+
+    let kp = pqc_generic::dsa::keygen_with_overrides(&params, seed, overrides);
 
     write_file(&args.sk_out, &kp.sk_bytes)?;
     write_file(&args.pk_out, &kp.pk_bytes)?;
@@ -529,6 +568,14 @@ fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, Str
         "pk_bytes": kp.pk_bytes.len(),
         "sk_hex": hex_encode(&kp.sk_bytes),
         "pk_hex": hex_encode(&kp.pk_bytes),
+        "seed_hex": hex_encode(&kp.seed),
+        "rho_hex": hex_encode(&kp.rho),
+        "k_seed_hex": hex_encode(&kp.k_seed),
+        "sigma_hex": hex_encode(&kp.sigma),
+        "seed_overridden": args.seed.is_some(),
+        "rho_overridden": args.rho.is_some(),
+        "k_seed_overridden": args.k_seed.is_some(),
+        "sigma_overridden": args.sigma.is_some(),
     }))
 }
 
