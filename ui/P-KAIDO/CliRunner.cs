@@ -13,6 +13,12 @@ internal static class CliRunner
             FileName = cliPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // Rust always writes UTF-8 to stdout/stderr regardless of the OS locale/codepage.
+            // Without this, .NET decodes redirected output using the system codepage, which
+            // mangles any non-ASCII text pqc-cli emits (e.g. the "≡" in NTT error messages) —
+            // badly enough, in some cases, to break JSON parsing on the receiving end.
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
         };

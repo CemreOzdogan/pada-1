@@ -34,8 +34,11 @@ fn is_prime(n: i32) -> bool {
     true
 }
 
-/// q must be prime, NTT-suitable for n=256 (q ≡ 1 mod 512), and small enough to keep
-/// coefficient arithmetic comfortably inside i32/i64 and the UI's numeric widgets.
+/// q must be prime, NTT-suitable for n=256 (q ≡ 1 mod 512), and small enough to leave headroom
+/// in i32 arithmetic (2*gamma1, etc. all stay comfortably below q). All NTT/rounding math here
+/// runs in i64 internally, so there's no correctness reason to cap this near 2^23 the way
+/// FIPS 204's own q happens to be sized — well-known larger NTT primes (e.g. 998244353) are
+/// intentionally allowed.
 pub fn validate_q(q: i32) -> Result<(), String> {
     if q < 5 {
         return Err(format!("q={q} is too small"));
@@ -49,8 +52,8 @@ pub fn validate_q(q: i32) -> Result<(), String> {
             (q - 1) % 512
         ));
     }
-    if q >= (1 << 23) {
-        return Err(format!("q={q} is too large; must be < 2^23"));
+    if q >= 2_000_000_000 {
+        return Err(format!("q={q} is too large; must be < 2,000,000,000"));
     }
     Ok(())
 }

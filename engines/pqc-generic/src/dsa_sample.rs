@@ -9,7 +9,7 @@ use sha3::{Shake128, Shake256};
 use crate::encode::bits_for_q;
 use crate::poly::{Poly, N};
 
-/// Uniform rejection sampling in [0, q) from SHAKE128(seed||i||j), generalized to any q < 2^23
+/// Uniform rejection sampling in [0, q) from SHAKE128(seed||i||j), generalized to any i32 q
 /// (vs. `sample::sample_uniform`'s fixed 12-bit assumption). Used for ExpandA, called k*l times.
 pub fn sample_uniform_wide(seed: &[u8; 32], i: u8, j: u8, q: i32) -> Poly {
     let bits = bits_for_q(q);

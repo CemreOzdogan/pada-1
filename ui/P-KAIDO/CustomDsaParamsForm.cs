@@ -47,7 +47,7 @@ internal sealed class CustomDsaParamsForm : Form
 
         _kBox = AddNumericRow(root, "k (matrix rows)", 1, 8, 4);
         _lBox = AddNumericRow(root, "l (matrix columns)", 1, 8, 4);
-        _qBox = AddNumericRow(root, "q (NTT-suitable prime)", 5, 8_388_607, 8_380_417);
+        _qBox = AddNumericRow(root, "q (NTT-suitable prime)", 5, 1_999_999_999, 8_380_417);
         _gamma1Box = AddNumericRow(root, "gamma1 (coefficient bound)", 1, 2_000_000_000, 131_072);
 
         var previewCaption = new Label
