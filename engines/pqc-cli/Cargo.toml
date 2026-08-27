@@ -9,4 +9,6 @@ pqc-ml-dsa-rustcrypto = { version = "0.1.0", path = "../pqc-ml-dsa-rustcrypto" }
 pqc-ml-kem-rustcrypto = { version = "0.1.0", path = "../pqc-ml-kem-rustcrypto" }
 pqc-ml-dsa-libcrux = { version = "0.1.0", path = "../pqc-ml-dsa-libcrux" }
 pqc-ml-kem-libcrux = { version = "0.1.0", path = "../pqc-ml-kem-libcrux" }
+pqc-generic = { version = "0.1.0", path = "../pqc-generic" }
+pqc-contracts = { version = "0.1.0", path = "../pqc-contracts" }
 serde_json = "1.0.151"

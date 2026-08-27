@@ -50,6 +50,15 @@ enum MlDsaOp {
     Sign(DsaSignArgs),
     /// Verify a file against a signature
     Verify(DsaVerifyArgs),
+    /// Generate a signing keypair with custom (non-standard) parameters
+    KeygenCustom(DsaKeygenCustomArgs),
+    /// Sign a file with a custom-engine key
+    SignCustom(DsaSignCustomArgs),
+    /// Verify a file against a signature from a custom-engine key
+    VerifyCustom(DsaVerifyCustomArgs),
+    /// Validate a (k, l, q, gamma1) tuple and preview the derived eta/gamma2/tau/omega,
+    /// without running keygen. No file I/O.
+    ValidateCustom(DsaValidateCustomArgs),
 }
 
 #[derive(Subcommand)]
@@ -104,6 +113,66 @@ struct DsaVerifyArgs {
     file: PathBuf,
     #[arg(long)]
     sig: PathBuf,
+}
+
+#[derive(Args)]
+struct DsaKeygenCustomArgs {
+    #[arg(long)]
+    k: u32,
+    #[arg(long)]
+    l: u32,
+    #[arg(long)]
+    q: i32,
+    #[arg(long)]
+    gamma1: i32,
+    #[arg(long)]
+    sk_out: PathBuf,
+    #[arg(long)]
+    pk_out: PathBuf,
+    /// Where to write the derived parameter set (JSON) — required by sign-custom/verify-custom
+    #[arg(long)]
+    params_out: PathBuf,
+}
+
+#[derive(Args)]
+struct DsaSignCustomArgs {
+    /// Parameter set JSON written by keygen-custom
+    #[arg(long)]
+    params: PathBuf,
+    #[arg(long)]
+    sk: PathBuf,
+    /// File to sign
+    #[arg(long)]
+    file: PathBuf,
+    /// Where to write the signature (defaults to <file>.sig)
+    #[arg(long)]
+    sig_out: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct DsaVerifyCustomArgs {
+    /// Parameter set JSON written by keygen-custom
+    #[arg(long)]
+    params: PathBuf,
+    #[arg(long)]
+    pk: PathBuf,
+    /// File whose signature is being checked
+    #[arg(long)]
+    file: PathBuf,
+    #[arg(long)]
+    sig: PathBuf,
+}
+
+#[derive(Args)]
+struct DsaValidateCustomArgs {
+    #[arg(long)]
+    k: u32,
+    #[arg(long)]
+    l: u32,
+    #[arg(long)]
+    q: i32,
+    #[arg(long)]
+    gamma1: i32,
 }
 
 #[derive(Args)]
@@ -169,6 +238,10 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
             MlDsaOp::Keygen(args) => dsa_keygen(args),
             MlDsaOp::Sign(args) => dsa_sign(args),
             MlDsaOp::Verify(args) => dsa_verify(args),
+            MlDsaOp::KeygenCustom(args) => dsa_keygen_custom(args),
+            MlDsaOp::SignCustom(args) => dsa_sign_custom(args),
+            MlDsaOp::VerifyCustom(args) => dsa_verify_custom(args),
+            MlDsaOp::ValidateCustom(args) => dsa_validate_custom(args),
         },
         Scheme::MlKem { op } => match op {
             MlKemOp::Keygen(args) => kem_keygen(args),
@@ -282,6 +355,155 @@ fn dsa_verify(args: DsaVerifyArgs) -> Result<serde_json::Value, String> {
         "valid": valid,
         "pk_hex": hex_encode(&pk_bytes),
         "signature_hex": hex_encode(&signature),
+    }))
+}
+
+fn parameter_set_from_generic(params: &pqc_generic::dsa_params::GenericDsaParams) -> pqc_contracts::ParameterSet {
+    pqc_contracts::ParameterSet {
+        scheme: pqc_contracts::Scheme::MlDsa,
+        name: None,
+        is_standard: false,
+        n: 256,
+        q: params.q as u32,
+        kem: None,
+        dsa: Some(pqc_contracts::DsaKnobs {
+            k: params.k,
+            l: params.l,
+            eta: params.eta,
+            gamma1: params.gamma1 as u32,
+            gamma2: params.gamma2 as u32,
+            tau: params.tau,
+            omega: params.omega,
+        }),
+    }
+}
+
+fn load_custom_params(path: &Path) -> Result<pqc_generic::dsa_params::GenericDsaParams, String> {
+    let bytes = read_file(path)?;
+    let parameter_set: pqc_contracts::ParameterSet = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("failed to parse params file '{}': {e}", path.display()))?;
+
+    if parameter_set.scheme != pqc_contracts::Scheme::MlDsa {
+        return Err("params file is not for ml-dsa".to_string());
+    }
+    if parameter_set.n != 256 {
+        return Err(format!("params file has n={}, expected 256", parameter_set.n));
+    }
+    let dsa = parameter_set.dsa.ok_or("params file has no `dsa` knobs")?;
+    let q = parameter_set.q as i32;
+
+    // Defensive: re-validate even though keygen-custom already validated q, in case the file
+    // was hand-edited.
+    pqc_generic::dsa_params::validate_q(q)?;
+
+    Ok(pqc_generic::dsa_params::GenericDsaParams {
+        k: dsa.k,
+        l: dsa.l,
+        q,
+        eta: dsa.eta,
+        gamma1: dsa.gamma1 as i32,
+        gamma2: dsa.gamma2 as i32,
+        tau: dsa.tau,
+        omega: dsa.omega,
+    })
+}
+
+fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, String> {
+    let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1)?;
+    let kp = pqc_generic::dsa::keygen(&params);
+
+    write_file(&args.sk_out, &kp.sk_bytes)?;
+    write_file(&args.pk_out, &kp.pk_bytes)?;
+
+    let parameter_set = parameter_set_from_generic(&params);
+    let params_json = serde_json::to_string_pretty(&parameter_set)
+        .map_err(|e| format!("failed to serialize parameter set: {e}"))?;
+    write_file(&args.params_out, params_json.as_bytes())?;
+
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-dsa",
+        "op": "keygen",
+        "engine": "custom",
+        "k": params.k,
+        "l": params.l,
+        "q": params.q,
+        "n": 256,
+        "eta": params.eta,
+        "gamma1": params.gamma1,
+        "gamma2": params.gamma2,
+        "tau": params.tau,
+        "omega": params.omega,
+        "sk_path": path_str(&args.sk_out),
+        "pk_path": path_str(&args.pk_out),
+        "params_path": path_str(&args.params_out),
+        "sk_bytes": kp.sk_bytes.len(),
+        "pk_bytes": kp.pk_bytes.len(),
+        "sk_hex": hex_encode(&kp.sk_bytes),
+        "pk_hex": hex_encode(&kp.pk_bytes),
+    }))
+}
+
+fn dsa_sign_custom(args: DsaSignCustomArgs) -> Result<serde_json::Value, String> {
+    let params = load_custom_params(&args.params)?;
+    let sk_bytes = read_file(&args.sk)?;
+    let message = read_file(&args.file)?;
+
+    let signature = pqc_generic::dsa::sign(&params, &sk_bytes, &message)?;
+
+    let sig_out = args
+        .sig_out
+        .unwrap_or_else(|| with_extra_extension(&args.file, "sig"));
+    write_file(&sig_out, &signature)?;
+
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-dsa",
+        "op": "sign",
+        "engine": "custom",
+        "file": path_str(&args.file),
+        "signature_path": path_str(&sig_out),
+        "signature_bytes": signature.len(),
+        "signature_hex": hex_encode(&signature),
+    }))
+}
+
+fn dsa_verify_custom(args: DsaVerifyCustomArgs) -> Result<serde_json::Value, String> {
+    let params = load_custom_params(&args.params)?;
+    let pk_bytes = read_file(&args.pk)?;
+    let message = read_file(&args.file)?;
+    let signature = read_file(&args.sig)?;
+
+    let valid = pqc_generic::dsa::verify(&params, &pk_bytes, &message, &signature)?;
+
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-dsa",
+        "op": "verify",
+        "engine": "custom",
+        "file": path_str(&args.file),
+        "signature_path": path_str(&args.sig),
+        "valid": valid,
+        "pk_hex": hex_encode(&pk_bytes),
+        "signature_hex": hex_encode(&signature),
+    }))
+}
+
+fn dsa_validate_custom(args: DsaValidateCustomArgs) -> Result<serde_json::Value, String> {
+    let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1)?;
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-dsa",
+        "op": "validate-custom",
+        "k": params.k,
+        "l": params.l,
+        "q": params.q,
+        "n": 256,
+        "eta": params.eta,
+        "gamma1": params.gamma1,
+        "gamma2": params.gamma2,
+        "tau": params.tau,
+        "omega": params.omega,
     }))
 }
 

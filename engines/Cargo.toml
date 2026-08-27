@@ -6,15 +6,14 @@ members = [
     "pqc-ml-kem-libcrux",
     "pqc-ml-dsa-libcrux",
     "pqc-cli",
+    "pqc-contracts",
+    "pqc-generic",
 ]
 
-# pqc-contracts, pqc-reference, pqc-generic are parked, not deleted:
-# future work for non-standard-parameter exploration and generic-vs-reference
-# benchmarking. Excluded from the workspace so they don't need to compile.
+# pqc-reference is parked, not deleted: future work for generic-vs-reference
+# benchmarking. Excluded from the workspace so it doesn't need to compile.
 exclude = [
-    "pqc-contracts",
     "pqc-reference",
-    "pqc-generic",
 ]
 
 [workspace.package]

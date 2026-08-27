@@ -8,16 +8,17 @@ namespace PKaido;
 internal sealed class MainForm : Form
 {
     // Kaido-inspired palette: near-black indigo, azure dragon-scale blue, gold horns/eyes as the warm accent.
-    private static readonly Color BgColor = ColorTranslator.FromHtml("#14141C");
-    private static readonly Color PanelColor = ColorTranslator.FromHtml("#1F2233");
-    private static readonly Color InputBgColor = ColorTranslator.FromHtml("#161A24");
-    private static readonly Color BorderColor = ColorTranslator.FromHtml("#3A4160");
-    private static readonly Color TextColor = ColorTranslator.FromHtml("#E8E6DE");
-    private static readonly Color SecondaryTextColor = ColorTranslator.FromHtml("#8891A8");
-    private static readonly Color AccentColor = ColorTranslator.FromHtml("#2E7FD9");
-    private static readonly Color AccentHoverColor = ColorTranslator.FromHtml("#4FA3F5");
-    private static readonly Color GoldColor = ColorTranslator.FromHtml("#D4A94E");
-    private static readonly Color ErrorColor = ColorTranslator.FromHtml("#C23B3B");
+    // Internal (not just the ones CustomDsaParamsForm needs) so any future dialog can match exactly.
+    internal static readonly Color BgColor = ColorTranslator.FromHtml("#14141C");
+    internal static readonly Color PanelColor = ColorTranslator.FromHtml("#1F2233");
+    internal static readonly Color InputBgColor = ColorTranslator.FromHtml("#161A24");
+    internal static readonly Color BorderColor = ColorTranslator.FromHtml("#3A4160");
+    internal static readonly Color TextColor = ColorTranslator.FromHtml("#E8E6DE");
+    internal static readonly Color SecondaryTextColor = ColorTranslator.FromHtml("#8891A8");
+    internal static readonly Color AccentColor = ColorTranslator.FromHtml("#2E7FD9");
+    internal static readonly Color AccentHoverColor = ColorTranslator.FromHtml("#4FA3F5");
+    internal static readonly Color GoldColor = ColorTranslator.FromHtml("#D4A94E");
+    internal static readonly Color ErrorColor = ColorTranslator.FromHtml("#C23B3B");
 
     private enum FieldKind { InputFile, OutputFile, OutputFolder, TextMessage }
 
@@ -27,6 +28,12 @@ internal sealed class MainForm : Form
     {
         ["ML-DSA"] = ["ml-dsa-44", "ml-dsa-65", "ml-dsa-87"],
         ["ML-KEM"] = ["ml-kem-512", "ml-kem-768", "ml-kem-1024"],
+    };
+
+    private static readonly Dictionary<string, string[]> EnginesByScheme = new()
+    {
+        ["ML-DSA"] = ["rustcrypto", "libcrux", "custom"],
+        ["ML-KEM"] = ["rustcrypto", "libcrux"],
     };
 
     private static readonly Dictionary<string, string[]> OperationsByScheme = new()
@@ -83,6 +90,7 @@ internal sealed class MainForm : Form
 
     private readonly List<(TextBox Box, FieldSpec Spec)> _currentFields = [];
     private readonly BindingList<RunRow> _rows = [];
+    private CustomDsaParamsResult? _customDsaParams;
 
     private sealed record RunRow(string Time, string Scheme, string Op, string Variant, string Engine, bool Ok, string Duration, string Summary, string RawJson);
 
@@ -131,8 +139,7 @@ internal sealed class MainForm : Form
 
         optionsRow.Controls.Add(new Label { Text = "Engine:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) }, 2, 0);
         _engineBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, Margin = new Padding(3, 3, 16, 3) };
-        _engineBox.Items.AddRange(["rustcrypto", "libcrux"]);
-        _engineBox.SelectedIndex = 0;
+        _engineBox.SelectedIndexChanged += (_, _) => OnEngineChanged();
         optionsRow.Controls.Add(_engineBox, 3, 0);
 
         optionsRow.Controls.Add(new Label { Text = "Variant:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 6, 0) }, 4, 0);
@@ -330,12 +337,41 @@ internal sealed class MainForm : Form
         _variantBox.Items.Clear();
         _variantBox.Items.AddRange(VariantsByScheme[scheme]);
         _variantBox.SelectedIndex = 0;
+        _variantBox.Enabled = true;
+
+        _engineBox.Items.Clear();
+        _engineBox.Items.AddRange(EnginesByScheme[scheme]);
+        _engineBox.SelectedIndex = 0;
 
         // Clearing Items resets SelectedIndex to -1, so setting it to 0 always changes it and
         // fires SelectedIndexChanged — that's what drives OnOperationChanged for this scheme.
         _operationBox.Items.Clear();
         _operationBox.Items.AddRange(OperationsByScheme[scheme]);
         _operationBox.SelectedIndex = 0;
+    }
+
+    private void OnEngineChanged()
+    {
+        if (GetSelectedEngine() != "custom")
+        {
+            _customDsaParams = null;
+            _variantBox.Enabled = true;
+            OnOperationChanged();
+            return;
+        }
+
+        var result = CustomDsaParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
+        if (result is null)
+        {
+            // Don't leave a half-configured "custom" selection with no params behind it.
+            _customDsaParams = null;
+            _engineBox.SelectedIndex = 0;
+            return;
+        }
+
+        _customDsaParams = result;
+        _variantBox.Enabled = false;
+        OnOperationChanged();
     }
 
     private string? GetSelectedVariant() => _variantBox.SelectedItem as string;
@@ -356,7 +392,22 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var specs = FieldsByOp[(scheme, op)];
+        // OnSchemeChanged rebuilds _engineBox before _operationBox, and the engine-changed
+        // handler calls back into here — so this can run with `op` still holding the previous
+        // scheme's operation name (e.g. "Encapsulate" while `scheme` already reads "ML-DSA").
+        // _operationBox's own rebuild fires a second, consistent call right after; this one
+        // just needs to not crash.
+        if (!FieldsByOp.TryGetValue((scheme, op), out var specs))
+        {
+            return;
+        }
+
+        if (GetSelectedEngine() == "custom" && (op == "Sign" || op == "Verify"))
+        {
+            FieldSpec paramsField = new("params", "Custom params file (from keygen)", FieldKind.InputFile, Required: true);
+            specs = [paramsField, .. specs];
+        }
+
         for (int i = 0; i < specs.Length; i++)
         {
             var spec = specs[i];
@@ -458,7 +509,18 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (_schemeBox.SelectedItem is not string scheme || GetSelectedVariant() is not string variant || GetSelectedOperation() is not string op || GetSelectedEngine() is not string engine)
+        if (_schemeBox.SelectedItem is not string scheme || GetSelectedOperation() is not string op || GetSelectedEngine() is not string engine)
+        {
+            return;
+        }
+
+        if (engine == "custom")
+        {
+            RunCustomDsa(op);
+            return;
+        }
+
+        if (GetSelectedVariant() is not string variant)
         {
             return;
         }
@@ -621,6 +683,13 @@ internal sealed class MainForm : Form
             }
         }
 
+        RunCliAndRecord(args, scheme, op, variant, engine);
+    }
+
+    /// Shared by both the standard (rustcrypto/libcrux) and custom-engine run paths: launches
+    /// pqc-cli, parses its JSON stdout, and appends a row to the results grid.
+    private void RunCliAndRecord(List<string> args, string scheme, string op, string variantLabel, string engineLabel)
+    {
         CliResult result;
         try
         {
@@ -649,12 +718,115 @@ internal sealed class MainForm : Form
         }
 
         string duration = FormatDuration(result.Elapsed);
-        _rows.Insert(0, new RunRow(DateTime.Now.ToString("HH:mm:ss"), scheme, op, variant, engine, ok, duration, summary, rawJson));
+        _rows.Insert(0, new RunRow(DateTime.Now.ToString("HH:mm:ss"), scheme, op, variantLabel, engineLabel, ok, duration, summary, rawJson));
         if (_grid.Rows.Count > 0)
         {
             _grid.ClearSelection();
             _grid.Rows[0].Selected = true;
         }
+    }
+
+    private void RunCustomDsa(string op)
+    {
+        if (_customDsaParams is not { } p)
+        {
+            MessageBox.Show(this, "Set custom ML-DSA parameters first.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (op == "Keygen")
+        {
+            string? requestedFolder = null;
+            foreach (var (box, spec) in _currentFields)
+            {
+                if (spec.ArgName == "out-dir")
+                {
+                    requestedFolder = box.Text;
+                }
+            }
+
+            string folder = ResolveKeygenFolder(requestedFolder, "custom", "custom");
+            try
+            {
+                Directory.CreateDirectory(folder);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Couldn't create '{folder}':\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var args = new List<string>
+            {
+                "ml-dsa", "keygen-custom",
+                "--k", p.K.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--l", p.L.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--q", p.Q.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--gamma1", p.Gamma1.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--sk-out", Path.Combine(folder, "custom-sk.bin"),
+                "--pk-out", Path.Combine(folder, "custom-pk.bin"),
+                "--params-out", Path.Combine(folder, "custom-params.json"),
+            };
+            RunCliAndRecord(args, "ML-DSA", op, "custom", "custom");
+            return;
+        }
+
+        // Sign / Verify: reuse the same dynamic fields as the standard engine (sk/file/text/
+        // sig-out or pk/file/sig), plus the "params" field prepended in OnOperationChanged.
+        foreach (var (box, spec) in _currentFields)
+        {
+            if (spec.Required && string.IsNullOrWhiteSpace(box.Text))
+            {
+                MessageBox.Show(this, $"'{spec.Label}' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+        }
+
+        if (op == "Sign")
+        {
+            TextBox? fileBox = null, textBox = null;
+            foreach (var (box, spec) in _currentFields)
+            {
+                if (spec.ArgName == "file") fileBox = box;
+                if (spec.ArgName == "text") textBox = box;
+            }
+
+            bool hasFile = fileBox is not null && !string.IsNullOrWhiteSpace(fileBox.Text);
+            bool hasText = textBox is not null && !string.IsNullOrWhiteSpace(textBox.Text);
+            if (hasFile == hasText)
+            {
+                MessageBox.Show(
+                    this,
+                    hasFile ? "Provide either a file to sign or typed text — not both." : "Nothing to sign. Pick a file, or type text in the box below.",
+                    "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (hasText)
+            {
+                try
+                {
+                    fileBox!.Text = WriteTypedMessage(textBox!.Text, "custom");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, $"Couldn't save typed text:\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+        }
+
+        var signVerifyArgs = new List<string> { "ml-dsa", op == "Sign" ? "sign-custom" : "verify-custom" };
+        foreach (var (box, spec) in _currentFields)
+        {
+            if (!string.IsNullOrWhiteSpace(box.Text))
+            {
+                signVerifyArgs.Add("--" + spec.ArgName);
+                signVerifyArgs.Add(box.Text);
+            }
+        }
+
+        RunCliAndRecord(signVerifyArgs, "ML-DSA", op, "custom", "custom");
     }
 
     private static string Summarize(JsonElement root, bool ok)
@@ -813,7 +985,7 @@ internal sealed class MainForm : Form
     // Applies the palette to one control based on its runtime type. Called both for the static
     // control tree (via ThemeTree) and at each dynamic control's creation site (scheme/operation
     // change rebuilds radio buttons and fields at runtime, so a one-time tree walk isn't enough).
-    private static void ThemeControl(Control control)
+    internal static void ThemeControl(Control control)
     {
         switch (control)
         {
@@ -850,7 +1022,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private static void ThemeTree(Control root)
+    internal static void ThemeTree(Control root)
     {
         foreach (Control child in root.Controls)
         {
