@@ -72,6 +72,18 @@ enum MlKemOp {
     Encapsulate(EncapsulateArgs),
     /// Decapsulate a shared secret from a ciphertext
     Decapsulate(DecapsulateArgs),
+    /// Generate an encapsulation keypair with custom (non-standard) parameters
+    KeygenCustom(KemKeygenCustomArgs),
+    /// Encapsulate against a custom-engine public key
+    EncapsulateCustom(KemEncapsulateCustomArgs),
+    /// Decapsulate a shared secret from a custom-engine ciphertext
+    DecapsulateCustom(KemDecapsulateCustomArgs),
+    /// Validate a (k, n, q) tuple and preview the derived eta1/eta2/du/dv, without running
+    /// keygen. No file I/O.
+    ValidateCustom(KemValidateCustomArgs),
+    /// Check whether q is prime and NTT-suitable for the given n (q ≡ 1 mod 2n), without
+    /// needing k. No file I/O.
+    CheckQ(KemCheckQArgs),
 }
 
 #[derive(Args)]
@@ -226,6 +238,67 @@ struct DecapsulateArgs {
     ss_out: Option<PathBuf>,
 }
 
+#[derive(Args)]
+struct KemKeygenCustomArgs {
+    #[arg(long)]
+    k: u32,
+    #[arg(long)]
+    n: usize,
+    #[arg(long)]
+    q: i32,
+    #[arg(long)]
+    sk_out: PathBuf,
+    #[arg(long)]
+    pk_out: PathBuf,
+    /// Where to write the derived parameter set (JSON) — required by encapsulate-custom/decapsulate-custom
+    #[arg(long)]
+    params_out: PathBuf,
+}
+
+#[derive(Args)]
+struct KemEncapsulateCustomArgs {
+    /// Parameter set JSON written by keygen-custom
+    #[arg(long)]
+    params: PathBuf,
+    #[arg(long)]
+    pk: PathBuf,
+    #[arg(long)]
+    ct_out: PathBuf,
+    #[arg(long)]
+    ss_out: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct KemDecapsulateCustomArgs {
+    /// Parameter set JSON written by keygen-custom
+    #[arg(long)]
+    params: PathBuf,
+    #[arg(long)]
+    sk: PathBuf,
+    #[arg(long)]
+    ct: PathBuf,
+    #[arg(long)]
+    ss_out: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct KemValidateCustomArgs {
+    #[arg(long)]
+    k: u32,
+    #[arg(long)]
+    n: usize,
+    #[arg(long)]
+    q: i32,
+}
+
+#[derive(Args)]
+struct KemCheckQArgs {
+    #[arg(long)]
+    q: i32,
+    #[arg(long)]
+    n: usize,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -257,6 +330,11 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
             MlKemOp::Keygen(args) => kem_keygen(args),
             MlKemOp::Encapsulate(args) => kem_encapsulate(args),
             MlKemOp::Decapsulate(args) => kem_decapsulate(args),
+            MlKemOp::KeygenCustom(args) => kem_keygen_custom(args),
+            MlKemOp::EncapsulateCustom(args) => kem_encapsulate_custom(args),
+            MlKemOp::DecapsulateCustom(args) => kem_decapsulate_custom(args),
+            MlKemOp::ValidateCustom(args) => kem_validate_custom(args),
+            MlKemOp::CheckQ(args) => kem_check_q(args),
         },
     }
 }
@@ -632,6 +710,164 @@ fn kem_decapsulate(args: DecapsulateArgs) -> Result<serde_json::Value, String> {
         "ciphertext_hex": hex_encode(&ciphertext),
         "shared_secret_hex": hex_encode(&shared_secret),
         "shared_secret_path": args.ss_out.as_deref().map(path_str),
+    }))
+}
+
+fn kem_parameter_set_from_generic(params: &pqc_generic::custom_kem_params::GenericCustomKemParams) -> pqc_contracts::ParameterSet {
+    pqc_contracts::ParameterSet {
+        scheme: pqc_contracts::Scheme::MlKem,
+        name: None,
+        is_standard: false,
+        n: params.n as u32,
+        q: params.q as u32,
+        kem: Some(pqc_contracts::KemKnobs {
+            k: params.k,
+            eta1: params.eta1,
+            eta2: params.eta2,
+            du: params.du,
+            dv: params.dv,
+        }),
+        dsa: None,
+    }
+}
+
+fn load_custom_kem_params(path: &Path) -> Result<pqc_generic::custom_kem_params::GenericCustomKemParams, String> {
+    let bytes = read_file(path)?;
+    let parameter_set: pqc_contracts::ParameterSet = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("failed to parse params file '{}': {e}", path.display()))?;
+
+    if parameter_set.scheme != pqc_contracts::Scheme::MlKem {
+        return Err("params file is not for ml-kem".to_string());
+    }
+    let kem = parameter_set.kem.ok_or("params file has no `kem` knobs")?;
+    let n = parameter_set.n as usize;
+    let q = parameter_set.q as i32;
+
+    // Defensive: re-validate even though keygen-custom already validated this, in case the
+    // file was hand-edited.
+    pqc_generic::custom_kem_params::validate_n(n)?;
+    pqc_generic::custom_kem_params::validate_q(q, n)?;
+
+    Ok(pqc_generic::custom_kem_params::GenericCustomKemParams {
+        k: kem.k,
+        n,
+        q,
+        eta1: kem.eta1,
+        eta2: kem.eta2,
+        du: kem.du,
+        dv: kem.dv,
+    })
+}
+
+fn kem_keygen_custom(args: KemKeygenCustomArgs) -> Result<serde_json::Value, String> {
+    let params = pqc_generic::custom_kem_params::build_params(args.k, args.n, args.q)?;
+    let kp = pqc_generic::custom_kem::keygen(&params);
+
+    write_file(&args.sk_out, &kp.sk_bytes)?;
+    write_file(&args.pk_out, &kp.pk_bytes)?;
+
+    let parameter_set = kem_parameter_set_from_generic(&params);
+    let params_json = serde_json::to_string_pretty(&parameter_set)
+        .map_err(|e| format!("failed to serialize parameter set: {e}"))?;
+    write_file(&args.params_out, params_json.as_bytes())?;
+
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-kem",
+        "op": "keygen",
+        "engine": "custom",
+        "k": params.k,
+        "n": params.n,
+        "q": params.q,
+        "eta1": params.eta1,
+        "eta2": params.eta2,
+        "du": params.du,
+        "dv": params.dv,
+        "sk_path": path_str(&args.sk_out),
+        "pk_path": path_str(&args.pk_out),
+        "params_path": path_str(&args.params_out),
+        "sk_bytes": kp.sk_bytes.len(),
+        "pk_bytes": kp.pk_bytes.len(),
+        "sk_hex": hex_encode(&kp.sk_bytes),
+        "pk_hex": hex_encode(&kp.pk_bytes),
+    }))
+}
+
+fn kem_encapsulate_custom(args: KemEncapsulateCustomArgs) -> Result<serde_json::Value, String> {
+    let params = load_custom_kem_params(&args.params)?;
+    let pk_bytes = read_file(&args.pk)?;
+
+    let (ciphertext, shared_secret) = pqc_generic::custom_kem::encapsulate(&params, &pk_bytes)?;
+
+    write_file(&args.ct_out, &ciphertext)?;
+    if let Some(ss_out) = &args.ss_out {
+        write_file(ss_out, &shared_secret)?;
+    }
+
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-kem",
+        "op": "encapsulate",
+        "engine": "custom",
+        "public_key_path": path_str(&args.pk),
+        "ciphertext_path": path_str(&args.ct_out),
+        "ciphertext_bytes": ciphertext.len(),
+        "ciphertext_hex": hex_encode(&ciphertext),
+        "shared_secret_hex": hex_encode(&shared_secret),
+        "shared_secret_path": args.ss_out.as_deref().map(path_str),
+    }))
+}
+
+fn kem_decapsulate_custom(args: KemDecapsulateCustomArgs) -> Result<serde_json::Value, String> {
+    let params = load_custom_kem_params(&args.params)?;
+    let sk_bytes = read_file(&args.sk)?;
+    let ciphertext = read_file(&args.ct)?;
+
+    let shared_secret = pqc_generic::custom_kem::decapsulate(&params, &sk_bytes, &ciphertext)?;
+
+    if let Some(ss_out) = &args.ss_out {
+        write_file(ss_out, &shared_secret)?;
+    }
+
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-kem",
+        "op": "decapsulate",
+        "engine": "custom",
+        "secret_key_path": path_str(&args.sk),
+        "ciphertext_path": path_str(&args.ct),
+        "ciphertext_hex": hex_encode(&ciphertext),
+        "shared_secret_hex": hex_encode(&shared_secret),
+        "shared_secret_path": args.ss_out.as_deref().map(path_str),
+    }))
+}
+
+fn kem_validate_custom(args: KemValidateCustomArgs) -> Result<serde_json::Value, String> {
+    let params = pqc_generic::custom_kem_params::build_params(args.k, args.n, args.q)?;
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-kem",
+        "op": "validate-custom",
+        "k": params.k,
+        "n": params.n,
+        "q": params.q,
+        "eta1": params.eta1,
+        "eta2": params.eta2,
+        "du": params.du,
+        "dv": params.dv,
+    }))
+}
+
+fn kem_check_q(args: KemCheckQArgs) -> Result<serde_json::Value, String> {
+    pqc_generic::custom_kem_params::validate_n(args.n)?;
+    pqc_generic::custom_kem_params::validate_q(args.q, args.n)?;
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-kem",
+        "op": "check-q",
+        "q": args.q,
+        "n": args.n,
+        "ntt_suitable": true,
     }))
 }
 

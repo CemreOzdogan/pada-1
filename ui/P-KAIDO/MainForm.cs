@@ -33,7 +33,7 @@ internal sealed class MainForm : Form
     private static readonly Dictionary<string, string[]> EnginesByScheme = new()
     {
         ["ML-DSA"] = ["rustcrypto", "libcrux", "custom"],
-        ["ML-KEM"] = ["rustcrypto", "libcrux"],
+        ["ML-KEM"] = ["rustcrypto", "libcrux", "custom"],
     };
 
     private static readonly Dictionary<string, string[]> OperationsByScheme = new()
@@ -91,6 +91,7 @@ internal sealed class MainForm : Form
     private readonly List<(TextBox Box, FieldSpec Spec)> _currentFields = [];
     private readonly BindingList<RunRow> _rows = [];
     private CustomDsaParamsResult? _customDsaParams;
+    private CustomKemParamsResult? _customKemParams;
 
     private sealed record RunRow(string Time, string Scheme, string Op, string Variant, string Engine, bool Ok, string Duration, string Summary, string RawJson);
 
@@ -355,21 +356,37 @@ internal sealed class MainForm : Form
         if (GetSelectedEngine() != "custom")
         {
             _customDsaParams = null;
+            _customKemParams = null;
             _variantBox.Enabled = true;
             OnOperationChanged();
             return;
         }
 
-        var result = CustomDsaParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
-        if (result is null)
+        bool isDsa = _schemeBox.SelectedItem as string == "ML-DSA";
+        if (isDsa)
         {
-            // Don't leave a half-configured "custom" selection with no params behind it.
-            _customDsaParams = null;
-            _engineBox.SelectedIndex = 0;
-            return;
+            var result = CustomDsaParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
+            if (result is null)
+            {
+                // Don't leave a half-configured "custom" selection with no params behind it.
+                _customDsaParams = null;
+                _engineBox.SelectedIndex = 0;
+                return;
+            }
+            _customDsaParams = result;
+        }
+        else
+        {
+            var result = CustomKemParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
+            if (result is null)
+            {
+                _customKemParams = null;
+                _engineBox.SelectedIndex = 0;
+                return;
+            }
+            _customKemParams = result;
         }
 
-        _customDsaParams = result;
         _variantBox.Enabled = false;
         OnOperationChanged();
     }
@@ -427,7 +444,9 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (GetSelectedEngine() == "custom" && (op == "Sign" || op == "Verify"))
+        bool needsCustomParamsField = GetSelectedEngine() == "custom"
+            && (op == "Sign" || op == "Verify" || op == "Encapsulate" || op == "Decapsulate");
+        if (needsCustomParamsField)
         {
             FieldSpec paramsField = new("params", "Custom params file (from keygen)", FieldKind.InputFile, Required: true);
             specs = [paramsField, .. specs];
@@ -541,7 +560,14 @@ internal sealed class MainForm : Form
 
         if (engine == "custom")
         {
-            RunCustomDsa(op);
+            if (scheme == "ML-DSA")
+            {
+                RunCustomDsa(op);
+            }
+            else
+            {
+                RunCustomKem(op);
+            }
             return;
         }
 
@@ -855,6 +881,131 @@ internal sealed class MainForm : Form
         }
 
         RunCliAndRecord(signVerifyArgs, "ML-DSA", op, "custom", "custom");
+    }
+
+    private void RunCustomKem(string op)
+    {
+        if (_customKemParams is not { } p)
+        {
+            MessageBox.Show(this, "Set custom ML-KEM parameters first.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (op == "Keygen")
+        {
+            string? requestedFolder = null;
+            foreach (var (box, spec) in _currentFields)
+            {
+                if (spec.ArgName == "out-dir")
+                {
+                    requestedFolder = box.Text;
+                }
+            }
+
+            string folder = ResolveKeygenFolder(requestedFolder, "custom", "custom");
+            try
+            {
+                Directory.CreateDirectory(folder);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Couldn't create '{folder}':\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var args = new List<string>
+            {
+                "ml-kem", "keygen-custom",
+                "--k", p.K.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--n", p.N.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--q", p.Q.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--sk-out", Path.Combine(folder, "custom-sk.bin"),
+                "--pk-out", Path.Combine(folder, "custom-pk.bin"),
+                "--params-out", Path.Combine(folder, "custom-params.json"),
+            };
+            RunCliAndRecord(args, "ML-KEM", op, "custom", "custom");
+            return;
+        }
+
+        if (op == "Encapsulate")
+        {
+            // ct-out defaults to a generated path when left blank, same as the standard engine
+            // (its FieldSpec is Required:false) — the generic required-fields loop below
+            // wouldn't catch a blank ct-out, and encapsulate-custom's --ct-out is mandatory, so
+            // this needs the same default-path resolution RunClicked's standard path already does.
+            TextBox? pkBox = null, ctOutBox = null, ssOutBox = null, paramsBox = null;
+            foreach (var (box, spec) in _currentFields)
+            {
+                switch (spec.ArgName)
+                {
+                    case "pk": pkBox = box; break;
+                    case "ct-out": ctOutBox = box; break;
+                    case "ss-out": ssOutBox = box; break;
+                    case "params": paramsBox = box; break;
+                }
+            }
+
+            if (paramsBox is null || string.IsNullOrWhiteSpace(paramsBox.Text))
+            {
+                MessageBox.Show(this, "'Custom params file (from keygen)' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (pkBox is null || string.IsNullOrWhiteSpace(pkBox.Text))
+            {
+                MessageBox.Show(this, "'Public key (pk)' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string ctOutPath = ResolveCiphertextPath(ctOutBox?.Text, "custom");
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ctOutPath)!);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Couldn't create output folder for '{ctOutPath}':\n{ex.Message}", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var args = new List<string>
+            {
+                "ml-kem", "encapsulate-custom",
+                "--params", paramsBox.Text,
+                "--pk", pkBox.Text,
+                "--ct-out", ctOutPath,
+            };
+            if (ssOutBox is not null && !string.IsNullOrWhiteSpace(ssOutBox.Text))
+            {
+                args.Add("--ss-out");
+                args.Add(ssOutBox.Text);
+            }
+
+            RunCliAndRecord(args, "ML-KEM", op, "custom", "custom");
+            return;
+        }
+
+        // Decapsulate: sk/ct/params are all Required:true and ss-out is optional, so the plain
+        // generic loop (same as DSA's Verify) is sufficient — no default-path special-casing needed.
+        foreach (var (box, spec) in _currentFields)
+        {
+            if (spec.Required && string.IsNullOrWhiteSpace(box.Text))
+            {
+                MessageBox.Show(this, $"'{spec.Label}' is required.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+        }
+
+        var decapsArgs = new List<string> { "ml-kem", "decapsulate-custom" };
+        foreach (var (box, spec) in _currentFields)
+        {
+            if (!string.IsNullOrWhiteSpace(box.Text))
+            {
+                decapsArgs.Add("--" + spec.ArgName);
+                decapsArgs.Add(box.Text);
+            }
+        }
+
+        RunCliAndRecord(decapsArgs, "ML-KEM", op, "custom", "custom");
     }
 
     private static string Summarize(JsonElement root, bool ok)
