@@ -73,7 +73,7 @@ pub fn decode_pk(bytes: &[u8], params: &GenericDsaParams) -> Result<([u8; 32], V
 
 pub fn encode_sk(
     rho: &[u8; 32],
-    k_seed: &[u8; 32],
+    cap_k: &[u8; 32],
     tr: &[u8; 32],
     s1: &[Poly],
     s2: &[Poly],
@@ -84,7 +84,7 @@ pub fn encode_sk(
     let q_bits = bits_for_q(params.q);
     let mut out = Vec::new();
     out.extend_from_slice(rho);
-    out.extend_from_slice(k_seed);
+    out.extend_from_slice(cap_k);
     out.extend_from_slice(tr);
     out.extend(encode_shifted(s1, params.eta as i32, eta_bits));
     out.extend(encode_shifted(s2, params.eta as i32, eta_bits));
@@ -94,7 +94,7 @@ pub fn encode_sk(
 
 pub struct DecodedSk {
     pub rho: [u8; 32],
-    pub k_seed: [u8; 32],
+    pub cap_k: [u8; 32],
     pub tr: [u8; 32],
     pub s1: Vec<Poly>,
     pub s2: Vec<Poly>,
@@ -119,8 +119,8 @@ pub fn decode_sk(bytes: &[u8], params: &GenericDsaParams) -> Result<DecodedSk, S
 
     let mut rho = [0u8; 32];
     rho.copy_from_slice(&bytes[0..32]);
-    let mut k_seed = [0u8; 32];
-    k_seed.copy_from_slice(&bytes[32..64]);
+    let mut cap_k = [0u8; 32];
+    cap_k.copy_from_slice(&bytes[32..64]);
     let mut tr = [0u8; 32];
     tr.copy_from_slice(&bytes[64..96]);
 
@@ -131,7 +131,7 @@ pub fn decode_sk(bytes: &[u8], params: &GenericDsaParams) -> Result<DecodedSk, S
     offset += s2_len;
     let t = decode_poly_vec(&bytes[offset..offset + t_len], q_bits, k);
 
-    Ok(DecodedSk { rho, k_seed, tr, s1, s2, t })
+    Ok(DecodedSk { rho, cap_k, tr, s1, s2, t })
 }
 
 pub fn encode_sig(c_tilde: &[u8; 32], z: &[Poly], h: &Hint, params: &GenericDsaParams) -> Vec<u8> {

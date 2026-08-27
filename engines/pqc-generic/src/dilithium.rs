@@ -25,7 +25,10 @@ const MAX_SIGN_ATTEMPTS: u32 = 100_000;
 
 pub struct SigningKey {
     pub rho: [u8; 32],
-    pub k_seed: [u8; 32],
+    /// FIPS 204's `K` — the 256-bit value from `(rho, rho_prime, K) = H(xi, 1024)`, carried in
+    /// the signing key and used at signing time to derive that signature's own rho' (see
+    /// `sign`'s local `rho_prime`, a different value from keygen's).
+    pub cap_k: [u8; 32],
     pub tr: [u8; 32],
     pub s1: Vec<Poly>,
     pub s2: Vec<Poly>,
@@ -102,47 +105,49 @@ fn high_bits_hash_bytes(w1: &[Poly], gamma2: i32, q: i32) -> Vec<u8> {
 }
 
 /// Lets the caller substitute any of the three hash-derived keygen seeds with a chosen 32-byte
-/// value, bypassing `derive32(seed, nonce)` for that one — e.g. supplying `rho` directly hands
-/// `ExpandA` an arbitrary matrix A that was never actually derived from `seed` at all. Purely a
+/// value, bypassing `derive32(xi, nonce)` for that one — e.g. supplying `rho` directly hands
+/// `ExpandA` an arbitrary matrix A that was never actually derived from `xi` at all. Purely a
 /// research/fault-injection affordance for the custom engine; `None` in every field reproduces
-/// the normal derivation exactly.
+/// the normal derivation exactly. Field names follow FIPS 204: `(rho, rho_prime, cap_k) =
+/// H(xi, 1024)`, rho ∈ {0,1}^256, rho_prime ∈ {0,1}^512 (this engine's `derive32` always
+/// returns 256 bits — a known simplification, not spec-exact), cap_k ∈ {0,1}^256.
 #[derive(Clone, Copy, Default)]
 pub struct KeygenOverrides {
     pub rho: Option<[u8; 32]>,
-    pub k_seed: Option<[u8; 32]>,
-    pub sigma: Option<[u8; 32]>,
+    pub cap_k: Option<[u8; 32]>,
+    pub rho_prime: Option<[u8; 32]>,
 }
 
-pub fn keygen(params: &GenericDsaParams, seed: [u8; 32]) -> (SigningKey, VerifyingKey) {
-    let (sk, vk, _) = keygen_with_overrides(params, seed, &KeygenOverrides::default());
+pub fn keygen(params: &GenericDsaParams, xi: [u8; 32]) -> (SigningKey, VerifyingKey) {
+    let (sk, vk, _) = keygen_with_overrides(params, xi, &KeygenOverrides::default());
     (sk, vk)
 }
 
 /// Resolved seeds are echoed back to the caller (`dsa.rs`) regardless of whether they came from
-/// `seed` or an override, so the CLI can report exactly what was used for a given run.
+/// `xi` or an override, so the CLI can report exactly what was used for a given run.
 pub struct ResolvedSeeds {
     pub rho: [u8; 32],
-    pub k_seed: [u8; 32],
-    pub sigma: [u8; 32],
+    pub cap_k: [u8; 32],
+    pub rho_prime: [u8; 32],
 }
 
 pub fn keygen_with_overrides(
     params: &GenericDsaParams,
-    seed: [u8; 32],
+    xi: [u8; 32],
     overrides: &KeygenOverrides,
 ) -> (SigningKey, VerifyingKey, ResolvedSeeds) {
     let table = build_table(params.q).expect("q already validated by dsa_params::build_params");
     let (k, l) = (params.k as usize, params.l as usize);
 
-    let rho = overrides.rho.unwrap_or_else(|| derive32(&seed, 0));
-    let k_seed = overrides.k_seed.unwrap_or_else(|| derive32(&seed, 1));
-    let sigma = overrides.sigma.unwrap_or_else(|| derive32(&seed, 2));
+    let rho = overrides.rho.unwrap_or_else(|| derive32(&xi, 0));
+    let cap_k = overrides.cap_k.unwrap_or_else(|| derive32(&xi, 1));
+    let rho_prime = overrides.rho_prime.unwrap_or_else(|| derive32(&xi, 2));
 
     let a = expand_a(&rho, k, l, params.q);
 
-    let s1: Vec<Poly> = (0..l).map(|i| sample_eta(&sigma, i as u16, params.eta)).collect();
+    let s1: Vec<Poly> = (0..l).map(|i| sample_eta(&rho_prime, i as u16, params.eta)).collect();
     let s2: Vec<Poly> = (0..k)
-        .map(|i| sample_eta(&sigma, (l + i) as u16, params.eta))
+        .map(|i| sample_eta(&rho_prime, (l + i) as u16, params.eta))
         .collect();
 
     let as1 = mat_vec_mul(&a, &s1, &table, params.q);
@@ -153,14 +158,14 @@ pub fn keygen_with_overrides(
     (
         SigningKey {
             rho,
-            k_seed,
+            cap_k,
             tr,
             s1,
             s2,
             t: t.clone(),
         },
         VerifyingKey { rho, t },
-        ResolvedSeeds { rho, k_seed, sigma },
+        ResolvedSeeds { rho, cap_k, rho_prime },
     )
 }
 
@@ -170,7 +175,10 @@ pub fn sign(params: &GenericDsaParams, sk: &SigningKey, message: &[u8]) -> Resul
     let a = expand_a(&sk.rho, k, l, params.q);
 
     let mu = hash32(&[&sk.tr, message]);
-    let rho_prime = hash32(&[&sk.k_seed, &mu]);
+    // This is a different rho' from keygen's: FIPS 204 reuses the symbol for both — this one
+    // is derived at signing time from cap_k (stored in the signing key) and the message, feeding
+    // ExpandMask, not the one from H(xi, 1024) that fed keygen's ExpandS.
+    let rho_prime = hash32(&[&sk.cap_k, &mu]);
 
     let beta = (params.tau * params.eta) as i32;
     let mut kappa: u16 = 0;

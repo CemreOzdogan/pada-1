@@ -16,15 +16,16 @@ pub struct KeyPair {
 }
 
 /// `keygen_with_overrides`'s result: the byte-encoded keypair plus every seed actually used
-/// (whether it came from `seed`/an override or was derived), so a caller doing fault-injection
-/// experiments can see and report exactly what fed into `ExpandA`/the noise sampling.
+/// (whether it came from `xi`/an override or was derived), so a caller doing fault-injection
+/// experiments can see and report exactly what fed into `ExpandA`/the noise sampling. Field
+/// names follow FIPS 204: `xi` is the master seed, `(rho, rho_prime, cap_k) = H(xi, 1024)`.
 pub struct KeyPairWithSeeds {
     pub sk_bytes: Vec<u8>,
     pub pk_bytes: Vec<u8>,
-    pub seed: [u8; 32],
+    pub xi: [u8; 32],
     pub rho: [u8; 32],
-    pub k_seed: [u8; 32],
-    pub sigma: [u8; 32],
+    pub cap_k: [u8; 32],
+    pub rho_prime: [u8; 32],
 }
 
 pub fn keygen(params: &GenericDsaParams) -> KeyPair {
@@ -35,30 +36,30 @@ pub fn keygen(params: &GenericDsaParams) -> KeyPair {
     }
 }
 
-/// `seed`: the master 256-bit seed, or `None` to draw one from the OS RNG. `overrides`: lets
-/// any of rho/k_seed/sigma bypass `SHAKE256(seed, nonce)` entirely and use a chosen value
-/// instead — see `dilithium::KeygenOverrides`.
+/// `xi`: the master 256-bit seed, or `None` to draw one from the OS RNG. `overrides`: lets any
+/// of rho/cap_k/rho_prime bypass `SHAKE256(xi, nonce)` entirely and use a chosen value instead
+/// — see `dilithium::KeygenOverrides`.
 pub fn keygen_with_overrides(
     params: &GenericDsaParams,
-    seed: Option<[u8; 32]>,
+    xi: Option<[u8; 32]>,
     overrides: dilithium::KeygenOverrides,
 ) -> KeyPairWithSeeds {
-    let seed = seed.unwrap_or_else(|| {
+    let xi = xi.unwrap_or_else(|| {
         let mut s = [0u8; 32];
         getrandom::fill(&mut s).expect("OS RNG failure");
         s
     });
-    let (sk, vk, resolved) = dilithium::keygen_with_overrides(params, seed, &overrides);
+    let (sk, vk, resolved) = dilithium::keygen_with_overrides(params, xi, &overrides);
 
-    let sk_bytes = encode_sk(&sk.rho, &sk.k_seed, &sk.tr, &sk.s1, &sk.s2, &sk.t, params);
+    let sk_bytes = encode_sk(&sk.rho, &sk.cap_k, &sk.tr, &sk.s1, &sk.s2, &sk.t, params);
     let pk_bytes = encode_pk(&vk.rho, &vk.t, params);
     KeyPairWithSeeds {
         sk_bytes,
         pk_bytes,
-        seed,
+        xi,
         rho: resolved.rho,
-        k_seed: resolved.k_seed,
-        sigma: resolved.sigma,
+        cap_k: resolved.cap_k,
+        rho_prime: resolved.rho_prime,
     }
 }
 
@@ -66,7 +67,7 @@ pub fn sign(params: &GenericDsaParams, sk_bytes: &[u8], message: &[u8]) -> Resul
     let decoded = decode_sk(sk_bytes, params)?;
     let sk = SigningKey {
         rho: decoded.rho,
-        k_seed: decoded.k_seed,
+        cap_k: decoded.cap_k,
         tr: decoded.tr,
         s1: decoded.s1,
         s2: decoded.s2,
@@ -228,8 +229,8 @@ mod tests {
         let b = keygen_with_overrides(&params, Some(seed), dilithium::KeygenOverrides::default());
 
         assert_eq!(a.rho, b.rho);
-        assert_eq!(a.k_seed, b.k_seed);
-        assert_eq!(a.sigma, b.sigma);
+        assert_eq!(a.cap_k, b.cap_k);
+        assert_eq!(a.rho_prime, b.rho_prime);
         assert_eq!(a.pk_bytes, b.pk_bytes, "same seed, no overrides, should be fully deterministic");
     }
 
@@ -251,9 +252,9 @@ mod tests {
 
         assert_ne!(normal.rho, faulted.rho, "rho override should not match the normally-derived rho");
         assert_eq!(faulted.rho, faulty_rho, "rho override should be used verbatim");
-        // k_seed/sigma are independent of rho — same seed, no override on those, so they match.
-        assert_eq!(normal.k_seed, faulted.k_seed);
-        assert_eq!(normal.sigma, faulted.sigma);
+        // cap_k/rho_prime are independent of rho — same seed, no override on those, so they match.
+        assert_eq!(normal.cap_k, faulted.cap_k);
+        assert_eq!(normal.rho_prime, faulted.rho_prime);
         assert_ne!(normal.pk_bytes, faulted.pk_bytes, "a different rho means a different matrix A, hence a different public key");
     }
 
@@ -267,8 +268,8 @@ mod tests {
             Some([1u8; 32]),
             dilithium::KeygenOverrides {
                 rho: Some([0x42u8; 32]),
-                k_seed: Some([0x43u8; 32]),
-                sigma: Some([0x44u8; 32]),
+                cap_k: Some([0x43u8; 32]),
+                rho_prime: Some([0x44u8; 32]),
             },
         );
 
