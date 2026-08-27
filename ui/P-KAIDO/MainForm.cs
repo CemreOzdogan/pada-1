@@ -382,6 +382,31 @@ internal sealed class MainForm : Form
 
     private void OnOperationChanged()
     {
+        // The whole control tree here is AutoSize/Dock=Fill nested (root -> fieldsGroup ->
+        // _fieldsPanel), so every single Controls.Add/Clear below can trigger its own full
+        // layout pass cascading all the way up to the Form. Suspending at the Form level batches
+        // all of that into one pass at the end instead of one per control mutation.
+        SuspendLayout();
+        try
+        {
+            RebuildOperationFields();
+        }
+        finally
+        {
+            ResumeLayout(true);
+        }
+    }
+
+    private void RebuildOperationFields()
+    {
+        // Controls.Clear() only detaches the old field controls — it does not Dispose them, so
+        // their native window handles are never released. This rebuilds the panel every time
+        // the operation changes, so without this, cycling operations repeatedly leaks a few
+        // HWNDs each time until the leaked-handle count is high enough to visibly lag the app.
+        foreach (var control in _fieldsPanel.Controls.Cast<Control>().ToList())
+        {
+            control.Dispose();
+        }
         _fieldsPanel.Controls.Clear();
         _fieldsPanel.RowStyles.Clear();
         _fieldsPanel.RowCount = 0;
