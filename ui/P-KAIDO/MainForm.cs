@@ -819,7 +819,10 @@ internal sealed class MainForm : Form
         var signVerifyArgs = new List<string> { "ml-dsa", op == "Sign" ? "sign-custom" : "verify-custom" };
         foreach (var (box, spec) in _currentFields)
         {
-            if (!string.IsNullOrWhiteSpace(box.Text))
+            // "text" is a UI-only pseudo-field — its content was already written to a file and
+            // stashed in the "file" field above. sign-custom/verify-custom have no --text flag
+            // (same as the standard engine's CLI shape), so sending it raw is a clap error.
+            if (spec.ArgName != "text" && !string.IsNullOrWhiteSpace(box.Text))
             {
                 signVerifyArgs.Add("--" + spec.ArgName);
                 signVerifyArgs.Add(box.Text);
