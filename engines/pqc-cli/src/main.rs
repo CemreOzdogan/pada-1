@@ -59,6 +59,9 @@ enum MlDsaOp {
     /// Validate a (k, l, q, gamma1) tuple and preview the derived eta/gamma2/tau/omega,
     /// without running keygen. No file I/O.
     ValidateCustom(DsaValidateCustomArgs),
+    /// Check whether a single q is prime and NTT-suitable for n=256 (q ≡ 1 mod 512), without
+    /// needing k/l/gamma1. No file I/O.
+    CheckQ(DsaCheckQArgs),
 }
 
 #[derive(Subcommand)]
@@ -176,6 +179,12 @@ struct DsaValidateCustomArgs {
 }
 
 #[derive(Args)]
+struct DsaCheckQArgs {
+    #[arg(long)]
+    q: i32,
+}
+
+#[derive(Args)]
 struct KemKeygenArgs {
     /// ml-kem-512, ml-kem-768, or ml-kem-1024
     #[arg(long)]
@@ -242,6 +251,7 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
             MlDsaOp::SignCustom(args) => dsa_sign_custom(args),
             MlDsaOp::VerifyCustom(args) => dsa_verify_custom(args),
             MlDsaOp::ValidateCustom(args) => dsa_validate_custom(args),
+            MlDsaOp::CheckQ(args) => dsa_check_q(args),
         },
         Scheme::MlKem { op } => match op {
             MlKemOp::Keygen(args) => kem_keygen(args),
@@ -504,6 +514,17 @@ fn dsa_validate_custom(args: DsaValidateCustomArgs) -> Result<serde_json::Value,
         "gamma2": params.gamma2,
         "tau": params.tau,
         "omega": params.omega,
+    }))
+}
+
+fn dsa_check_q(args: DsaCheckQArgs) -> Result<serde_json::Value, String> {
+    pqc_generic::dsa_params::validate_q(args.q)?;
+    Ok(json!({
+        "ok": true,
+        "scheme": "ml-dsa",
+        "op": "check-q",
+        "q": args.q,
+        "ntt_suitable": true,
     }))
 }
 

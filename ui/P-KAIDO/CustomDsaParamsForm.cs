@@ -14,6 +14,7 @@ internal sealed class CustomDsaParamsForm : Form
     private readonly NumericUpDown _lBox;
     private readonly NumericUpDown _qBox;
     private readonly NumericUpDown _gamma1Box;
+    private readonly Label _qCheckLabel;
     private readonly Label _previewLabel;
     private readonly Label _errorLabel;
     private readonly Button _okButton;
@@ -48,6 +49,17 @@ internal sealed class CustomDsaParamsForm : Form
         _kBox = AddNumericRow(root, "k (matrix rows)", 1, 8, 4);
         _lBox = AddNumericRow(root, "l (matrix columns)", 1, 8, 4);
         _qBox = AddNumericRow(root, "q (NTT-suitable prime)", 5, 1_999_999_999, 8_380_417);
+
+        // Standalone quick check: is this q prime and NTT-suitable, independent of k/l/gamma1 —
+        // lets you try candidate primes before committing to a full parameter set.
+        var checkQButton = new Button { Text = "Check q", AutoSize = true, Anchor = AnchorStyles.Left };
+        checkQButton.Click += (_, _) => CheckQ();
+        _qCheckLabel = new Label { Text = string.Empty, AutoSize = true, MaximumSize = new Size(300, 0), Anchor = AnchorStyles.Left };
+        int checkQRow = root.RowCount;
+        root.RowCount++;
+        root.Controls.Add(checkQButton, 0, checkQRow);
+        root.Controls.Add(_qCheckLabel, 1, checkQRow);
+
         _gamma1Box = AddNumericRow(root, "gamma1 (coefficient bound)", 1, 2_000_000_000, 131_072);
 
         var previewCaption = new Label
@@ -111,6 +123,7 @@ internal sealed class CustomDsaParamsForm : Form
         {
             box.ValueChanged += (_, _) => InvalidatePreview();
         }
+        _qBox.ValueChanged += (_, _) => _qCheckLabel.Text = string.Empty;
     }
 
     public static CustomDsaParamsResult? ShowParamsDialog(IWin32Window owner, string cliPath)
@@ -202,6 +215,57 @@ internal sealed class CustomDsaParamsForm : Form
         {
             _errorLabel.Text = string.IsNullOrEmpty(rawJson) ? "(no output from pqc-cli)" : rawJson;
             _okButton.Enabled = false;
+        }
+    }
+
+    private void CheckQ()
+    {
+        if (string.IsNullOrWhiteSpace(_cliPath))
+        {
+            _qCheckLabel.ForeColor = MainForm.ErrorColor;
+            _qCheckLabel.Text = "Set the path to pqc-cli.exe first (in the main window).";
+            return;
+        }
+
+        var args = new List<string>
+        {
+            "ml-dsa", "check-q",
+            "--q", _qBox.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        CliResult result;
+        try
+        {
+            result = CliRunner.Run(_cliPath, args);
+        }
+        catch (Exception ex)
+        {
+            _qCheckLabel.ForeColor = MainForm.ErrorColor;
+            _qCheckLabel.Text = $"Failed to launch pqc-cli: {ex.Message}";
+            return;
+        }
+
+        string rawJson = result.StdOut.Length > 0 ? result.StdOut : result.StdErr;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            var root = doc.RootElement;
+            bool ok = root.TryGetProperty("ok", out var okProp) && okProp.GetBoolean();
+            if (ok)
+            {
+                _qCheckLabel.ForeColor = MainForm.GoldColor;
+                _qCheckLabel.Text = "NTT-suitable (prime, q ≡ 1 mod 512)";
+            }
+            else
+            {
+                _qCheckLabel.ForeColor = MainForm.ErrorColor;
+                _qCheckLabel.Text = root.TryGetProperty("error", out var err) ? err.GetString() ?? "error" : "error";
+            }
+        }
+        catch (JsonException)
+        {
+            _qCheckLabel.ForeColor = MainForm.ErrorColor;
+            _qCheckLabel.Text = string.IsNullOrEmpty(rawJson) ? "(no output from pqc-cli)" : rawJson;
         }
     }
 
