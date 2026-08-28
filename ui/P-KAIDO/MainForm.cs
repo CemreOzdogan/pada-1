@@ -363,31 +363,11 @@ internal sealed class MainForm : Form
             return;
         }
 
-        bool isDsa = _schemeBox.SelectedItem as string == "ML-DSA";
-        if (isDsa)
-        {
-            var result = CustomDsaParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
-            if (result is null)
-            {
-                // Don't leave a half-configured "custom" selection with no params behind it.
-                _customDsaParams = null;
-                _engineBox.SelectedIndex = 0;
-                return;
-            }
-            _customDsaParams = result;
-        }
-        else
-        {
-            var result = CustomKemParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
-            if (result is null)
-            {
-                _customKemParams = null;
-                _engineBox.SelectedIndex = 0;
-                return;
-            }
-            _customKemParams = result;
-        }
-
+        // Don't force the k/l/q/gamma1 dialog here — Sign/Verify (DSA) and Encapsulate/
+        // Decapsulate (KEM) only need a path to an already-generated params JSON file (the
+        // "params" field RebuildOperationFields adds below), never the dialog's own values.
+        // Only Keygen actually needs those, so RunCustomDsa/RunCustomKem prompt for them lazily,
+        // right before running, instead of gating engine selection on it up front.
         _variantBox.Enabled = false;
         OnOperationChanged();
     }
@@ -813,14 +793,21 @@ internal sealed class MainForm : Form
 
     private void RunCustomDsa(string op)
     {
-        if (_customDsaParams is not { } p)
-        {
-            MessageBox.Show(this, "Set custom ML-DSA parameters first.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
         if (op == "Keygen")
         {
+            // Only Keygen actually needs k/l/q/gamma1/overrides — prompt for them here, right
+            // before they're used, instead of forcing this dialog just to select the engine.
+            var p = _customDsaParams;
+            if (p is null)
+            {
+                p = CustomDsaParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
+                if (p is null)
+                {
+                    return;
+                }
+                _customDsaParams = p;
+            }
+
             string? requestedFolder = null;
             string? seedOverride = null, rhoOverride = null, signingSeedOverride = null, noiseSeedOverride = null;
             foreach (var (box, spec) in _currentFields)
@@ -889,6 +876,9 @@ internal sealed class MainForm : Form
 
         // Sign / Verify: reuse the same dynamic fields as the standard engine (sk/file/text/
         // sig-out or pk/file/sig), plus the "params" field prepended in OnOperationChanged.
+        // Deliberately doesn't touch _customDsaParams — the params JSON file the user points to
+        // (usually from an earlier keygen run, possibly in an earlier session entirely) already
+        // carries k/l/q/gamma1/etc, so there's nothing here for that dialog to add.
         foreach (var (box, spec) in _currentFields)
         {
             if (spec.Required && string.IsNullOrWhiteSpace(box.Text))
@@ -954,14 +944,23 @@ internal sealed class MainForm : Form
 
     private void RunCustomKem(string op)
     {
-        if (_customKemParams is not { } p)
-        {
-            MessageBox.Show(this, "Set custom ML-KEM parameters first.", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
         if (op == "Keygen")
         {
+            // Only Keygen actually needs k/n/q — prompt for them here, right before they're
+            // used, instead of forcing this dialog just to select the engine. Encapsulate/
+            // Decapsulate only need a path to an already-generated params JSON file (the
+            // "params" field RebuildOperationFields adds), which already carries k/n/q.
+            var p = _customKemParams;
+            if (p is null)
+            {
+                p = CustomKemParamsForm.ShowParamsDialog(this, _cliPathBox.Text);
+                if (p is null)
+                {
+                    return;
+                }
+                _customKemParams = p;
+            }
+
             string? requestedFolder = null;
             foreach (var (box, spec) in _currentFields)
             {
