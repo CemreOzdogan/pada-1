@@ -2,7 +2,7 @@
 //! (Algorithm 7, full Fiat-Shamir-with-aborts, hedged by default) / verify (Algorithm 8), over
 //! a runtime-chosen `GenericDsaParams`. Byte-exact against RustCrypto's `ml-dsa` and libcrux's
 //! `libcrux-ml-dsa` for the 3 standard parameter sets when their exact constants are supplied
-//! via `DsaParamOverrides` â€” see the `fips204_conformance` test module for the cross-check that
+//! via `DsaParamOverrides` — see the `fips204_conformance` test module for the cross-check that
 //! actually proves this, not just a claim.
 
 use sha3::digest::{ExtendableOutput, Update, XofReader};
@@ -23,25 +23,25 @@ const MAX_SIGN_ATTEMPTS: u32 = 100_000;
 
 pub struct SigningKey {
     pub rho: [u8; 32],
-    /// FIPS 204's `K` â€” carried in the signing key, used at signing time to derive that
+    /// FIPS 204's `K` — carried in the signing key, used at signing time to derive that
     /// signature's own rho'' (see `sign`'s local `rho_prime`, a different value from keygen's).
     pub cap_k: [u8; 32],
     pub tr: [u8; 64],
     pub s1: Vec<Poly>,
     pub s2: Vec<Poly>,
-    /// Power2Round's low bits â€” NOT full `t`. The public key only ever gets `t1` (see
+    /// Power2Round's low bits — NOT full `t`. The public key only ever gets `t1` (see
     /// `VerifyingKey`); `t0` here is what lets `sign` compute the exact hint correction `c*t0`.
     pub t0: Vec<Poly>,
 }
 
 pub struct VerifyingKey {
     pub rho: [u8; 32],
-    /// Power2Round's high bits â€” the spec's actual compressed public key component, not full `t`.
+    /// Power2Round's high bits — the spec's actual compressed public key component, not full `t`.
     pub t1: Vec<Poly>,
 }
 
 pub struct Signature {
-    /// Length is `params.lambda` bytes (32/48/64 for the standard sets â€” not a fixed 32).
+    /// Length is `params.lambda` bytes (32/48/64 for the standard sets — not a fixed 32).
     pub c_tilde: Vec<u8>,
     pub z: Vec<Poly>,
     pub h: Hint,
@@ -115,11 +115,11 @@ fn high_bits_hash_bytes(w1: &[Poly], gamma2: i32, q: i32) -> Vec<u8> {
 }
 
 /// Lets the caller substitute any of the three hash-derived keygen seeds with a chosen value,
-/// bypassing the `H(xi||k||l, 1024)` squeeze for that one â€” e.g. supplying `rho` directly hands
+/// bypassing the `H(xi||k||l, 1024)` squeeze for that one — e.g. supplying `rho` directly hands
 /// `ExpandA` an arbitrary matrix A that was never actually derived from `xi` at all. Purely a
 /// research/fault-injection affordance for the custom engine; `None` in every field reproduces
 /// the normal derivation exactly. Field names follow FIPS 204: `(rho, rho_prime, cap_k) =
-/// H(xi||k||l, 1024)`, rho âˆˆ {0,1}^256, rho_prime âˆˆ {0,1}^512, cap_k âˆˆ {0,1}^256.
+/// H(xi||k||l, 1024)`, rho ∈ {0,1}^256, rho_prime ∈ {0,1}^512, cap_k ∈ {0,1}^256.
 #[derive(Clone, Default)]
 pub struct KeygenOverrides {
     pub rho: Option<[u8; 32]>,
@@ -148,7 +148,7 @@ pub fn keygen_with_overrides(
     let table = build_table(params.q).expect("q already validated by dsa_params::build_params");
     let (k, l) = (params.k as usize, params.l as usize);
 
-    // FIPS 204 Algorithm 6: (rho, rho', K) = H(xi || IntegerToBytes(k,1) || IntegerToBytes(l,1), 1024) â€”
+    // FIPS 204 Algorithm 6: (rho, rho', K) = H(xi || IntegerToBytes(k,1) || IntegerToBytes(l,1), 1024) —
     // one continuous SHAKE256 squeeze, not three independent nonce-indexed calls.
     let mut hasher = Shake256::default();
     hasher.update(&xi);
@@ -196,7 +196,7 @@ pub fn keygen_with_overrides(
 }
 
 /// `deterministic`: if false (the spec's default), a fresh random `rnd` is mixed into rho'' for
-/// every signature (hedged signing). If true, `rnd = 0` â€” a spec-sanctioned deterministic mode,
+/// every signature (hedged signing). If true, `rnd = 0` — a spec-sanctioned deterministic mode,
 /// useful for reproducible testing (including the conformance test below, which needs signatures
 /// it can compare byte-for-byte against RustCrypto/libcrux run with the same explicit `rnd`).
 pub fn sign(
@@ -214,7 +214,7 @@ pub fn sign(
 }
 
 /// Signs with an explicit `rnd` (FIPS 204's hedged-signing randomness) rather than drawing one
-/// internally â€” the entry point the conformance test uses to match RustCrypto/libcrux exactly.
+/// internally — the entry point the conformance test uses to match RustCrypto/libcrux exactly.
 pub fn sign_with_rnd(
     params: &GenericDsaParams,
     sk: &SigningKey,
@@ -259,7 +259,7 @@ pub fn sign_with_rnd(
             continue;
         }
 
-        // FIPS 204: ct0 = c*t0; reject if ||ct0||âˆ >= gamma2; hint corrects for -ct0 relative
+        // FIPS 204: ct0 = c*t0; reject if ||ct0||∞ >= gamma2; hint corrects for -ct0 relative
         // to (w-cs2)+ct0 (recovering HighBits(w) at verify time, which only has t1, not t0).
         let ct0 = scalar_vec_mul(&c, &sk.t0, &table);
         if infinity_norm_centered_vec(&ct0, params.q) >= params.gamma2 {
@@ -311,7 +311,7 @@ pub fn verify(params: &GenericDsaParams, vk: &VerifyingKey, message: &[u8], sig:
     let mu = squeeze64(&[&tr, &[0u8], &[0u8], message]);
     let c = sample_challenge(&sig.c_tilde, params.tau);
 
-    // FIPS 204 Algorithm 8: w' = A*z - c*(t1 << d), d=13 â€” using the compressed t1, not full t.
+    // FIPS 204 Algorithm 8: w' = A*z - c*(t1 << d), d=13 — using the compressed t1, not full t.
     let az = mat_vec_mul(&a, &sig.z, &table, params.q);
     let t1_shifted: Vec<Poly> = vk
         .t1
