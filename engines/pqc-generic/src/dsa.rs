@@ -25,7 +25,7 @@ pub struct KeyPairWithSeeds {
     pub xi: [u8; 32],
     pub rho: [u8; 32],
     pub cap_k: [u8; 32],
-    pub rho_prime: [u8; 32],
+    pub rho_prime: [u8; 64],
 }
 
 pub fn keygen(params: &GenericDsaParams) -> KeyPair {
@@ -51,8 +51,8 @@ pub fn keygen_with_overrides(
     });
     let (sk, vk, resolved) = dilithium::keygen_with_overrides(params, xi, &overrides);
 
-    let sk_bytes = encode_sk(&sk.rho, &sk.cap_k, &sk.tr, &sk.s1, &sk.s2, &sk.t, params);
-    let pk_bytes = encode_pk(&vk.rho, &vk.t, params);
+    let sk_bytes = encode_sk(&sk.rho, &sk.cap_k, &sk.tr, &sk.s1, &sk.s2, &sk.t0, params);
+    let pk_bytes = encode_pk(&vk.rho, &vk.t1, params);
     KeyPairWithSeeds {
         sk_bytes,
         pk_bytes,
@@ -63,7 +63,15 @@ pub fn keygen_with_overrides(
     }
 }
 
-pub fn sign(params: &GenericDsaParams, sk_bytes: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+/// `deterministic`: false (the spec's default) mixes fresh OS randomness into every signature
+/// (hedged signing); true uses `rnd = 0`, a spec-sanctioned deterministic mode useful for
+/// reproducible research runs. See `dilithium::sign`.
+pub fn sign(
+    params: &GenericDsaParams,
+    sk_bytes: &[u8],
+    message: &[u8],
+    deterministic: bool,
+) -> Result<Vec<u8>, String> {
     let decoded = decode_sk(sk_bytes, params)?;
     let sk = SigningKey {
         rho: decoded.rho,
@@ -71,9 +79,9 @@ pub fn sign(params: &GenericDsaParams, sk_bytes: &[u8], message: &[u8]) -> Resul
         tr: decoded.tr,
         s1: decoded.s1,
         s2: decoded.s2,
-        t: decoded.t,
+        t0: decoded.t0,
     };
-    let sig = dilithium::sign(params, &sk, message)?;
+    let sig = dilithium::sign(params, &sk, message, deterministic)?;
     Ok(encode_sig(&sig.c_tilde, &sig.z, &sig.h, params))
 }
 
@@ -83,8 +91,8 @@ pub fn verify(
     message: &[u8],
     sig_bytes: &[u8],
 ) -> Result<bool, String> {
-    let (rho, t) = decode_pk(pk_bytes, params)?;
-    let vk = VerifyingKey { rho, t };
+    let (rho, t1) = decode_pk(pk_bytes, params)?;
+    let vk = VerifyingKey { rho, t1 };
     let (c_tilde, z, h) = decode_sig(sig_bytes, params)?;
     let sig = Signature { c_tilde, z, h };
     Ok(dilithium::verify(params, &vk, message, &sig))
@@ -107,6 +115,7 @@ pub fn bench_generic_dsa(parameter_set: ParameterSet, iterations: u64) -> Result
         gamma2: dsa_knobs.gamma2 as i32,
         tau: dsa_knobs.tau,
         omega: dsa_knobs.omega,
+        lambda: dsa_knobs.lambda,
     };
 
     let message = b"P-KAIDO bench message";
@@ -119,7 +128,7 @@ pub fn bench_generic_dsa(parameter_set: ParameterSet, iterations: u64) -> Result
 
     // Warmup
     let kp = keygen(&params);
-    let sig = sign(&params, &kp.sk_bytes, message)?;
+    let sig = sign(&params, &kp.sk_bytes, message, false)?;
     let _ = verify(&params, &kp.pk_bytes, message, &sig)?;
 
     for _ in 0..iterations {
@@ -128,7 +137,7 @@ pub fn bench_generic_dsa(parameter_set: ParameterSet, iterations: u64) -> Result
         keygen_ns.push(t0.elapsed().as_nanos() as f64);
 
         let t1 = Instant::now();
-        let sig_i = sign(&params, &kp_i.sk_bytes, message)?;
+        let sig_i = sign(&params, &kp_i.sk_bytes, message, false)?;
         sign_ns.push(t1.elapsed().as_nanos() as f64);
 
         let t2 = Instant::now();
@@ -181,48 +190,56 @@ fn stats(mut samples: Vec<f64>) -> TimingStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsa_params::build_params;
+    use crate::dsa_params::{build_params, DsaParamOverrides};
 
     fn roundtrip(params: &GenericDsaParams) {
         let kp = keygen(params);
         let msg = b"P-KAIDO smoke test message";
 
-        let sig = sign(params, &kp.sk_bytes, msg).expect("sign should succeed");
-        assert!(
-            verify(params, &kp.pk_bytes, msg, &sig).expect("verify should not error"),
-            "genuine signature should verify"
-        );
+        // Exercise both hedged (default) and deterministic signing.
+        for deterministic in [false, true] {
+            let sig = sign(params, &kp.sk_bytes, msg, deterministic).expect("sign should succeed");
+            assert!(
+                verify(params, &kp.pk_bytes, msg, &sig).expect("verify should not error"),
+                "genuine signature should verify (deterministic={deterministic})"
+            );
 
-        let tampered = b"P-KAIDO smoke test message!";
-        assert!(
-            !verify(params, &kp.pk_bytes, tampered, &sig).expect("verify should not error"),
-            "tampered message should not verify"
-        );
+            let tampered = b"P-KAIDO smoke test message!";
+            assert!(
+                !verify(params, &kp.pk_bytes, tampered, &sig).expect("verify should not error"),
+                "tampered message should not verify"
+            );
 
-        let mut bad_sig = sig.clone();
-        let last = bad_sig.len() - 1;
-        bad_sig[last] ^= 0xFF;
-        assert!(
-            !verify(params, &kp.pk_bytes, msg, &bad_sig).expect("verify should not error"),
-            "tampered signature should not verify"
-        );
+            let mut bad_sig = sig.clone();
+            let last = bad_sig.len() - 1;
+            bad_sig[last] ^= 0xFF;
+            // Flipping the signature's last byte corrupts the hint encoding's final cumulative-
+            // count byte. Unlike the old flat-bitmap hint format (where every byte pattern
+            // decoded, if to garbage), the real position-list encoding has structural validity
+            // constraints (monotonic cuts, in-bounds indices) — so tampering can legitimately
+            // produce a decode Err, not just an Ok(false). Both count as "rejected".
+            match verify(params, &kp.pk_bytes, msg, &bad_sig) {
+                Ok(valid) => assert!(!valid, "tampered signature should not verify"),
+                Err(_) => {} // malformed-signature decode error is also a correct rejection
+            }
+        }
     }
 
     #[test]
     fn roundtrip_custom_params_dilithium_shaped() {
-        let params = build_params(4, 4, 8380417, 131072).unwrap();
+        let params = build_params(4, 4, 8380417, 131072, &DsaParamOverrides::default()).unwrap();
         roundtrip(&params);
     }
 
     #[test]
     fn roundtrip_custom_params_small_q() {
-        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let params = build_params(2, 2, 524_801, 131_072, &DsaParamOverrides::default()).unwrap();
         roundtrip(&params);
     }
 
     #[test]
     fn same_seed_without_overrides_reproduces_normal_derivation() {
-        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let params = build_params(2, 2, 524_801, 131_072, &DsaParamOverrides::default()).unwrap();
         let seed = [7u8; 32];
 
         let a = keygen_with_overrides(&params, Some(seed), dilithium::KeygenOverrides::default());
@@ -236,7 +253,7 @@ mod tests {
 
     #[test]
     fn rho_override_bypasses_derivation_from_seed() {
-        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let params = build_params(2, 2, 524_801, 131_072, &DsaParamOverrides::default()).unwrap();
         let seed = [7u8; 32];
         let faulty_rho = [0xAAu8; 32];
 
@@ -262,19 +279,19 @@ mod tests {
     fn faulted_keypair_is_still_internally_consistent() {
         // The point of the override is to see how the RESULT changes when A wasn't honestly
         // derived from seed — not to produce a broken keypair. Sign/verify must still round-trip.
-        let params = build_params(2, 2, 12289, 4096).unwrap();
+        let params = build_params(2, 2, 524_801, 131_072, &DsaParamOverrides::default()).unwrap();
         let kp = keygen_with_overrides(
             &params,
             Some([1u8; 32]),
             dilithium::KeygenOverrides {
                 rho: Some([0x42u8; 32]),
                 cap_k: Some([0x43u8; 32]),
-                rho_prime: Some([0x44u8; 32]),
+                rho_prime: Some([0x44u8; 64]),
             },
         );
 
         let msg = b"faulted keygen smoke test";
-        let sig = sign(&params, &kp.sk_bytes, msg).expect("sign should still succeed with a faulted key");
+        let sig = sign(&params, &kp.sk_bytes, msg, true).expect("sign should still succeed with a faulted key");
         assert!(verify(&params, &kp.pk_bytes, msg, &sig).expect("verify should not error"));
     }
 }

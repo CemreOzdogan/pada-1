@@ -147,28 +147,46 @@ struct DsaKeygenCustomArgs {
     /// Where to write the derived parameter set (JSON) — required by sign-custom/verify-custom
     #[arg(long)]
     params_out: PathBuf,
-    /// Override the master 256-bit seed (64 hex chars) instead of drawing one from the OS RNG.
-    /// Still gets hashed normally into rho/noise-seed/signing-seed unless those are ALSO
+    /// Override the master 256-bit seed xi (64 hex chars) instead of drawing one from the OS
+    /// RNG. Still gets hashed normally into rho/noise-seed/signing-seed (one continuous
+    /// SHAKE256(xi||k||l, 1024) squeeze, per FIPS 204 Algorithm 6) unless those are ALSO
     /// overridden below.
     #[arg(long)]
     seed: Option<String>,
-    /// Override rho (64 hex chars, FIPS 204's rho), bypassing SHAKE256(seed, 0) entirely — feeds
-    /// an arbitrary matrix A into ExpandA instead of one honestly derived from seed.
-    /// Research/fault-injection only: the resulting key is still internally consistent
-    /// (sign/verify still round-trip), it just wasn't derived the normal way.
+    /// Override rho (64 hex chars, FIPS 204's rho), bypassing the SHAKE256(xi||k||l, 1024)
+    /// squeeze entirely — feeds an arbitrary matrix A into ExpandA instead of one honestly
+    /// derived from seed. Research/fault-injection only: the resulting key is still internally
+    /// consistent (sign/verify still round-trip), it just wasn't derived the normal way.
     #[arg(long)]
     rho: Option<String>,
-    /// Override the signing seed K (64 hex chars, FIPS 204's K), bypassing SHAKE256(seed, 1).
+    /// Override the signing seed K (64 hex chars, FIPS 204's K), bypassing that same squeeze.
     /// Stored in the secret key and used later, at SIGN time, to derive that signature's own
     /// randomness — has no effect on this keygen run's own matrix A or s1/s2 noise.
     #[arg(long)]
     signing_seed: Option<String>,
-    /// Override the noise seed rho' (64 hex chars, FIPS 204's rho' from keygen — a different
-    /// value from the rho' computed again at sign time), bypassing SHAKE256(seed, 2) — feeds
-    /// arbitrary noise into the s1/s2 secret-key sampling instead of noise honestly derived
-    /// from seed.
+    /// Override the noise seed rho' (128 hex chars — rho' is 512 bits per FIPS 204, unlike the
+    /// other 256-bit seeds; FIPS 204's rho' from keygen, a different value from the rho''
+    /// computed again at sign time), bypassing that same squeeze — feeds arbitrary noise into
+    /// the s1/s2 secret-key sampling instead of noise honestly derived from seed.
     #[arg(long)]
     noise_seed: Option<String>,
+    /// Override eta (FIPS 204's eta); omit to use the calibrated heuristic default. Set to the
+    /// exact spec constant (2 or 4) for a standard parameter set to get real FIPS 204 compliance.
+    #[arg(long)]
+    eta: Option<u32>,
+    /// Override gamma2; omit to use the calibrated heuristic default.
+    #[arg(long)]
+    gamma2: Option<i32>,
+    /// Override tau; omit to use the calibrated heuristic default.
+    #[arg(long)]
+    tau: Option<u32>,
+    /// Override omega; omit to use the calibrated heuristic default.
+    #[arg(long)]
+    omega: Option<u32>,
+    /// Override lambda, the byte length of c_tilde (32/48/64 for the standard sets); omit to
+    /// use the heuristic default.
+    #[arg(long)]
+    lambda: Option<u32>,
 }
 
 #[derive(Args)]
@@ -184,6 +202,10 @@ struct DsaSignCustomArgs {
     /// Where to write the signature (defaults to <file>.sig)
     #[arg(long)]
     sig_out: Option<PathBuf>,
+    /// Use rnd=0 (FIPS 204's deterministic signing mode) instead of hedging with fresh OS
+    /// randomness. Off by default, matching the spec's own default (hedged).
+    #[arg(long, default_value_t = false)]
+    deterministic: bool,
 }
 
 #[derive(Args)]
@@ -210,6 +232,16 @@ struct DsaValidateCustomArgs {
     q: i32,
     #[arg(long)]
     gamma1: i32,
+    #[arg(long)]
+    eta: Option<u32>,
+    #[arg(long)]
+    gamma2: Option<i32>,
+    #[arg(long)]
+    tau: Option<u32>,
+    #[arg(long)]
+    omega: Option<u32>,
+    #[arg(long)]
+    lambda: Option<u32>,
 }
 
 #[derive(Args)]
@@ -468,6 +500,22 @@ fn dsa_verify(args: DsaVerifyArgs) -> Result<serde_json::Value, String> {
     }))
 }
 
+fn dsa_param_overrides(
+    eta: Option<u32>,
+    gamma2: Option<i32>,
+    tau: Option<u32>,
+    omega: Option<u32>,
+    lambda: Option<u32>,
+) -> pqc_generic::dsa_params::DsaParamOverrides {
+    pqc_generic::dsa_params::DsaParamOverrides {
+        eta,
+        gamma2,
+        tau,
+        omega,
+        lambda,
+    }
+}
+
 fn parameter_set_from_generic(params: &pqc_generic::dsa_params::GenericDsaParams) -> pqc_contracts::ParameterSet {
     pqc_contracts::ParameterSet {
         scheme: pqc_contracts::Scheme::MlDsa,
@@ -484,6 +532,7 @@ fn parameter_set_from_generic(params: &pqc_generic::dsa_params::GenericDsaParams
             gamma2: params.gamma2 as u32,
             tau: params.tau,
             omega: params.omega,
+            lambda: params.lambda,
         }),
     }
 }
@@ -515,6 +564,7 @@ fn load_custom_params(path: &Path) -> Result<pqc_generic::dsa_params::GenericDsa
         gamma2: dsa.gamma2 as i32,
         tau: dsa.tau,
         omega: dsa.omega,
+        lambda: dsa.lambda,
     })
 }
 
@@ -533,11 +583,27 @@ fn parse_hex32(s: &str, field_name: &str) -> Result<[u8; 32], String> {
     Ok(out)
 }
 
+fn parse_hex64(s: &str, field_name: &str) -> Result<[u8; 64], String> {
+    if s.len() != 128 {
+        return Err(format!(
+            "--{field_name} must be exactly 128 hex characters (64 bytes), got {} characters",
+            s.len()
+        ));
+    }
+    let mut out = [0u8; 64];
+    for i in 0..64 {
+        out[i] = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+            .map_err(|_| format!("--{field_name} is not valid hex"))?;
+    }
+    Ok(out)
+}
+
 fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, String> {
-    let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1)?;
+    let overrides = dsa_param_overrides(args.eta, args.gamma2, args.tau, args.omega, args.lambda);
+    let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1, &overrides)?;
 
     let xi = args.seed.as_deref().map(|s| parse_hex32(s, "seed")).transpose()?;
-    let overrides = pqc_generic::dilithium::KeygenOverrides {
+    let seed_overrides = pqc_generic::dilithium::KeygenOverrides {
         rho: args.rho.as_deref().map(|s| parse_hex32(s, "rho")).transpose()?,
         cap_k: args
             .signing_seed
@@ -547,11 +613,11 @@ fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, Str
         rho_prime: args
             .noise_seed
             .as_deref()
-            .map(|s| parse_hex32(s, "noise-seed"))
+            .map(|s| parse_hex64(s, "noise-seed"))
             .transpose()?,
     };
 
-    let kp = pqc_generic::dsa::keygen_with_overrides(&params, xi, overrides);
+    let kp = pqc_generic::dsa::keygen_with_overrides(&params, xi, seed_overrides);
 
     write_file(&args.sk_out, &kp.sk_bytes)?;
     write_file(&args.pk_out, &kp.pk_bytes)?;
@@ -575,6 +641,7 @@ fn dsa_keygen_custom(args: DsaKeygenCustomArgs) -> Result<serde_json::Value, Str
         "gamma2": params.gamma2,
         "tau": params.tau,
         "omega": params.omega,
+        "lambda": params.lambda,
         "sk_path": path_str(&args.sk_out),
         "pk_path": path_str(&args.pk_out),
         "params_path": path_str(&args.params_out),
@@ -598,7 +665,7 @@ fn dsa_sign_custom(args: DsaSignCustomArgs) -> Result<serde_json::Value, String>
     let sk_bytes = read_file(&args.sk)?;
     let message = read_file(&args.file)?;
 
-    let signature = pqc_generic::dsa::sign(&params, &sk_bytes, &message)?;
+    let signature = pqc_generic::dsa::sign(&params, &sk_bytes, &message, args.deterministic)?;
 
     let sig_out = args
         .sig_out
@@ -610,6 +677,7 @@ fn dsa_sign_custom(args: DsaSignCustomArgs) -> Result<serde_json::Value, String>
         "scheme": "ml-dsa",
         "op": "sign",
         "engine": "custom",
+        "deterministic": args.deterministic,
         "file": path_str(&args.file),
         "signature_path": path_str(&sig_out),
         "signature_bytes": signature.len(),
@@ -639,7 +707,8 @@ fn dsa_verify_custom(args: DsaVerifyCustomArgs) -> Result<serde_json::Value, Str
 }
 
 fn dsa_validate_custom(args: DsaValidateCustomArgs) -> Result<serde_json::Value, String> {
-    let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1)?;
+    let overrides = dsa_param_overrides(args.eta, args.gamma2, args.tau, args.omega, args.lambda);
+    let params = pqc_generic::dsa_params::build_params(args.k, args.l, args.q, args.gamma1, &overrides)?;
     Ok(json!({
         "ok": true,
         "scheme": "ml-dsa",
@@ -653,6 +722,7 @@ fn dsa_validate_custom(args: DsaValidateCustomArgs) -> Result<serde_json::Value,
         "gamma2": params.gamma2,
         "tau": params.tau,
         "omega": params.omega,
+        "lambda": params.lambda,
     }))
 }
 

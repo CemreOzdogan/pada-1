@@ -92,6 +92,7 @@ internal sealed class MainForm : Form
     private readonly BindingList<RunRow> _rows = [];
     private CustomDsaParamsResult? _customDsaParams;
     private CustomKemParamsResult? _customKemParams;
+    private CheckBox? _deterministicCheckBox;
 
     private sealed record RunRow(string Time, string Scheme, string Op, string Variant, string Engine, bool Ok, string Duration, string Summary, string RawJson);
 
@@ -512,6 +513,24 @@ internal sealed class MainForm : Form
 
             _currentFields.Add((box, spec));
         }
+
+        // ML-DSA custom Sign only: hedged-vs-deterministic toggle. A checkbox doesn't fit the
+        // TextBox-based FieldSpec/_currentFields shape, so it's tracked separately.
+        _deterministicCheckBox = null;
+        if (scheme == "ML-DSA" && op == "Sign" && GetSelectedEngine() == "custom")
+        {
+            _fieldsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _fieldsPanel.RowCount++;
+            _deterministicCheckBox = new CheckBox
+            {
+                Text = "Deterministic signing (rnd=0, for reproducible testing — off = hedged, the FIPS 204 default)",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+            };
+            ThemeControl(_deterministicCheckBox);
+            _fieldsPanel.Controls.Add(_deterministicCheckBox, 0, specs.Length);
+            _fieldsPanel.SetColumnSpan(_deterministicCheckBox, 3);
+        }
     }
 
     private static void BrowseForField(TextBox box, FieldSpec spec)
@@ -816,13 +835,20 @@ internal sealed class MainForm : Form
                 }
             }
 
-            foreach (var (label, value) in new[] { ("Master seed", seedOverride), ("Matrix seed (rho)", rhoOverride), ("Signing seed (K)", signingSeedOverride), ("Noise seed (rho')", noiseSeedOverride) })
+            foreach (var (label, value) in new[] { ("Master seed", seedOverride), ("Matrix seed (rho)", rhoOverride), ("Signing seed (K)", signingSeedOverride) })
             {
                 if (!string.IsNullOrWhiteSpace(value) && !IsValidHex32(value))
                 {
                     MessageBox.Show(this, $"'{label}' override must be exactly 64 hex characters (32 bytes).", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+            }
+            // rho' is 512 bits per FIPS 204 (unlike the other three 256-bit seeds), so its hex
+            // override is twice as long.
+            if (!string.IsNullOrWhiteSpace(noiseSeedOverride) && !IsValidHex64(noiseSeedOverride))
+            {
+                MessageBox.Show(this, "'Noise seed (rho')' override must be exactly 128 hex characters (64 bytes).", "P-KAIDO", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
             }
 
             string folder = ResolveKeygenFolder(requestedFolder, "custom", "custom");
@@ -851,6 +877,11 @@ internal sealed class MainForm : Form
             if (!string.IsNullOrWhiteSpace(rhoOverride)) { args.Add("--rho"); args.Add(rhoOverride.Trim()); }
             if (!string.IsNullOrWhiteSpace(signingSeedOverride)) { args.Add("--signing-seed"); args.Add(signingSeedOverride.Trim()); }
             if (!string.IsNullOrWhiteSpace(noiseSeedOverride)) { args.Add("--noise-seed"); args.Add(noiseSeedOverride.Trim()); }
+            if (p.Eta is { } eta) { args.Add("--eta"); args.Add(eta.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+            if (p.Gamma2 is { } gamma2) { args.Add("--gamma2"); args.Add(gamma2.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+            if (p.Tau is { } tau) { args.Add("--tau"); args.Add(tau.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+            if (p.Omega is { } omega) { args.Add("--omega"); args.Add(omega.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+            if (p.Lambda is { } lambda) { args.Add("--lambda"); args.Add(lambda.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
 
             RunCliAndRecord(args, "ML-DSA", op, "custom", "custom");
             return;
@@ -912,6 +943,10 @@ internal sealed class MainForm : Form
                 signVerifyArgs.Add("--" + spec.ArgName);
                 signVerifyArgs.Add(box.Text);
             }
+        }
+        if (op == "Sign" && _deterministicCheckBox is { Checked: true })
+        {
+            signVerifyArgs.Add("--deterministic");
         }
 
         RunCliAndRecord(signVerifyArgs, "ML-DSA", op, "custom", "custom");
@@ -1046,6 +1081,12 @@ internal sealed class MainForm : Form
     {
         s = s.Trim();
         return s.Length == 64 && s.All(Uri.IsHexDigit);
+    }
+
+    private static bool IsValidHex64(string s)
+    {
+        s = s.Trim();
+        return s.Length == 128 && s.All(Uri.IsHexDigit);
     }
 
     private static string Summarize(JsonElement root, bool ok)
@@ -1228,6 +1269,10 @@ internal sealed class MainForm : Form
             case RadioButton radioButton:
                 radioButton.ForeColor = TextColor;
                 radioButton.BackColor = Color.Transparent;
+                break;
+            case CheckBox checkBox:
+                checkBox.ForeColor = TextColor;
+                checkBox.BackColor = Color.Transparent;
                 break;
             case Label label:
                 label.ForeColor = TextColor;

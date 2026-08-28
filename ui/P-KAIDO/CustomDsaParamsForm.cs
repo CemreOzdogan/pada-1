@@ -2,7 +2,9 @@ using System.Text.Json;
 
 namespace PKaido;
 
-internal sealed record CustomDsaParamsResult(uint K, uint L, long Q, long Gamma1);
+internal sealed record CustomDsaParamsResult(
+    uint K, uint L, long Q, long Gamma1,
+    uint? Eta, long? Gamma2, uint? Tau, uint? Omega, uint? Lambda);
 
 /// Modal parameter-entry dialog for the "custom" ML-DSA engine. The derived-knobs preview
 /// (eta/gamma2/tau/omega) is never computed here in C# — it's populated only from pqc-cli's
@@ -14,6 +16,11 @@ internal sealed class CustomDsaParamsForm : Form
     private readonly NumericUpDown _lBox;
     private readonly NumericUpDown _qBox;
     private readonly NumericUpDown _gamma1Box;
+    private readonly TextBox _etaBox;
+    private readonly TextBox _gamma2Box;
+    private readonly TextBox _tauBox;
+    private readonly TextBox _omegaBox;
+    private readonly TextBox _lambdaBox;
     private readonly Label _qCheckLabel;
     private readonly Label _previewLabel;
     private readonly Label _errorLabel;
@@ -29,7 +36,7 @@ internal sealed class CustomDsaParamsForm : Form
 
         Text = "Custom ML-DSA parameters";
         Width = 480;
-        Height = 400;
+        Height = 560;
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -61,6 +68,23 @@ internal sealed class CustomDsaParamsForm : Form
         root.Controls.Add(_qCheckLabel, 1, checkQRow);
 
         _gamma1Box = AddNumericRow(root, "gamma1 (coefficient bound)", 1, 2_000_000_000, 131_072);
+
+        var overridesCaption = new Label
+        {
+            Text = "Optional overrides (blank = calibrated heuristic default):",
+            AutoSize = true,
+            Padding = new Padding(0, 10, 0, 2),
+        };
+        int overridesRow = root.RowCount;
+        root.RowCount++;
+        root.Controls.Add(overridesCaption, 0, overridesRow);
+        root.SetColumnSpan(overridesCaption, 2);
+
+        _etaBox = AddOptionalTextRow(root, "eta override");
+        _gamma2Box = AddOptionalTextRow(root, "gamma2 override");
+        _tauBox = AddOptionalTextRow(root, "tau override");
+        _omegaBox = AddOptionalTextRow(root, "omega override");
+        _lambdaBox = AddOptionalTextRow(root, "lambda override (c̃ byte length)");
 
         var previewCaption = new Label
         {
@@ -123,6 +147,10 @@ internal sealed class CustomDsaParamsForm : Form
         {
             box.ValueChanged += (_, _) => InvalidatePreview();
         }
+        foreach (var box in new[] { _etaBox, _gamma2Box, _tauBox, _omegaBox, _lambdaBox })
+        {
+            box.TextChanged += (_, _) => InvalidatePreview();
+        }
         _qBox.ValueChanged += (_, _) => _qCheckLabel.Text = string.Empty;
     }
 
@@ -152,6 +180,19 @@ internal sealed class CustomDsaParamsForm : Form
         return box;
     }
 
+    private TextBox AddOptionalTextRow(TableLayoutPanel root, string label)
+    {
+        int row = root.RowCount;
+        root.RowCount++;
+
+        var lbl = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 10, 0) };
+        root.Controls.Add(lbl, 0, row);
+
+        var box = new TextBox { Dock = DockStyle.Fill };
+        root.Controls.Add(box, 1, row);
+        return box;
+    }
+
     private void InvalidatePreview()
     {
         _previewLabel.Text = "eta: -   gamma2: -   tau: -   omega: -";
@@ -175,6 +216,20 @@ internal sealed class CustomDsaParamsForm : Form
             "--q", _qBox.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "--gamma1", _gamma1Box.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
+
+        foreach (var (flag, box) in new[] { ("--eta", _etaBox), ("--gamma2", _gamma2Box), ("--tau", _tauBox), ("--omega", _omegaBox), ("--lambda", _lambdaBox) })
+        {
+            if (!string.IsNullOrWhiteSpace(box.Text))
+            {
+                if (!long.TryParse(box.Text.Trim(), out _))
+                {
+                    _errorLabel.Text = $"'{flag}' override must be a whole number (or blank).";
+                    return;
+                }
+                args.Add(flag);
+                args.Add(box.Text.Trim());
+            }
+        }
 
         CliResult result;
         try
@@ -269,9 +324,20 @@ internal sealed class CustomDsaParamsForm : Form
         }
     }
 
+    private static uint? ParseOptionalUInt(TextBox box) =>
+        string.IsNullOrWhiteSpace(box.Text) ? null : uint.Parse(box.Text.Trim());
+
+    private static long? ParseOptionalLong(TextBox box) =>
+        string.IsNullOrWhiteSpace(box.Text) ? null : long.Parse(box.Text.Trim());
+
     private CustomDsaParamsResult BuildResult() => new(
         (uint)_kBox.Value,
         (uint)_lBox.Value,
         (long)_qBox.Value,
-        (long)_gamma1Box.Value);
+        (long)_gamma1Box.Value,
+        ParseOptionalUInt(_etaBox),
+        ParseOptionalLong(_gamma2Box),
+        ParseOptionalUInt(_tauBox),
+        ParseOptionalUInt(_omegaBox),
+        ParseOptionalUInt(_lambdaBox));
 }

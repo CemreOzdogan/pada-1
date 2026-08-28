@@ -723,6 +723,8 @@ name = "pqc-generic"
 version = "0.1.0"
 dependencies = [
  "getrandom",
+ "libcrux-ml-dsa",
+ "ml-dsa",
  "pqc-contracts",
  "sha3",
 ]

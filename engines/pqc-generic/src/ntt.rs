@@ -41,6 +41,16 @@ fn bit_reverse(mut x: usize, log_n: u32) -> usize {
     r
 }
 
+/// FIPS 204's own root for its fixed q=8380417, n=256 (Appendix B / the reference `ZETA`
+/// constant). Once `sample_uniform_wide`'s raw output is treated as *already* being in NTT
+/// (evaluation) domain — see `ntt_mul_a` — "NTT domain" stops being an implementation-private
+/// convention and becomes externally meaningful: it must be built from this exact root, not
+/// merely *a* valid one, or the resulting Â disagrees with RustCrypto's/libcrux's even though
+/// every sampled byte matches. Irrelevant for any other q (no spec defines one), where any valid
+/// root keeps the scheme internally self-consistent.
+const DILITHIUM_Q: i64 = 8_380_417;
+const DILITHIUM_ZETA: i64 = 1753;
+
 /// Find a primitive 2n-th root of unity mod q. Necessary and sufficient check: zeta^n == -1
 /// (mod q) — this rules out zeta having any order that's a proper divisor of 2n, and
 /// zeta^(2n) == 1 already holds by construction (zeta = h^((q-1)/2n)), so no factorization
@@ -49,6 +59,10 @@ fn find_2n_root(q: i64, n: usize) -> Result<i64, String> {
     let two_n = (2 * n) as i64;
     if (q - 1) % two_n != 0 {
         return Err(format!("q={q} has no element of order {two_n} (NTT-unsuitable)"));
+    }
+    if q == DILITHIUM_Q && n == N {
+        debug_assert_eq!(mod_pow(DILITHIUM_ZETA, n as i64, q), q - 1);
+        return Ok(DILITHIUM_ZETA);
     }
     let exp = (q - 1) / two_n;
     for h in 2..100_000i64 {
@@ -146,6 +160,32 @@ pub fn ntt_mul(a: &Poly, b: &Poly, table: &NttTable) -> Poly {
     let mut av = to_i64_array(a);
     let mut bv = to_i64_array(b);
     ntt(&mut av, table);
+    ntt(&mut bv, table);
+
+    let mut cv = [0i64; N];
+    for i in 0..N {
+        cv[i] = (av[i] * bv[i]).rem_euclid(table.q);
+    }
+    inv_ntt(&mut cv, table);
+
+    let mut out = Poly::zero();
+    for i in 0..N {
+        out.coeffs[i] = cv[i] as i32;
+    }
+    out
+}
+
+/// Same as [`ntt_mul`], but `a_hat` is treated as *already* in NTT (evaluation) domain and is
+/// not forward-transformed. FIPS 204 Algorithm 32 (RejNTTPoly/ExpandA) samples matrix entries
+/// directly into the NTT domain — Â is never an inverse-transformed, then re-transformed,
+/// "normal" polynomial — so multiplying it against a normal-domain vector must skip the forward
+/// transform on the `a_hat` side, or the result is a different (still internally self-consistent,
+/// but not spec-matching) ring element. Used for every `A * vector` product (keygen's `t`,
+/// signing's `w = A*y`, verify's `w' = A*z - ...`); NOT for challenge-times-secret products like
+/// `c*s1`/`c*t0`, where both operands are genuinely normal-domain and `ntt_mul` is correct.
+pub fn ntt_mul_a(a_hat: &Poly, b_normal: &Poly, table: &NttTable) -> Poly {
+    let av = to_i64_array(a_hat);
+    let mut bv = to_i64_array(b_normal);
     ntt(&mut bv, table);
 
     let mut cv = [0i64; N];

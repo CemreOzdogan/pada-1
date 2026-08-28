@@ -43,6 +43,9 @@ pub struct DsaKnobs {
     pub gamma2: u32,
     pub tau: u32,
     pub omega: u32,
+    /// Length in bytes of c_tilde (32/48/64 for the standard ML-DSA-44/65/87 sets — FIPS 204
+    /// ties this to security category, not a fixed value).
+    pub lambda: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

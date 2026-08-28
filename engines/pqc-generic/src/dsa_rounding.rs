@@ -30,6 +30,35 @@ pub fn decompose(r: i32, gamma2: i32, q: i32) -> (i32, i32) {
     (r1 as i32, r0 as i32)
 }
 
+/// FIPS 204 Algorithm 35 (Power2Round): splits r into (r1, r0) with r = r1*2^13 + r0 (mod q),
+/// r0 in (-2^12, 2^12]. d=13 is a fixed global FIPS 204 constant (same for all three standard
+/// parameter sets, not derived from k/l/q/gamma1).
+pub fn power2round(r: i32, q: i32) -> (i32, i32) {
+    const D: i64 = 13;
+    let pow2d = 1i64 << D;
+    let r_mod = (r as i64).rem_euclid(q as i64);
+    let r0 = mod_pm(r_mod, pow2d);
+    let r1 = (r_mod - r0) >> D;
+    (r1 as i32, r0 as i32)
+}
+
+pub fn power2round_vec(v: &[Poly], q: i32) -> (Vec<Poly>, Vec<Poly>) {
+    let mut t1 = Vec::with_capacity(v.len());
+    let mut t0 = Vec::with_capacity(v.len());
+    for p in v {
+        let mut p1 = Poly::zero();
+        let mut p0 = Poly::zero();
+        for i in 0..N {
+            let (r1, r0) = power2round(p.coeffs[i], q);
+            p1.coeffs[i] = r1;
+            p0.coeffs[i] = r0;
+        }
+        t1.push(p1);
+        t0.push(p0);
+    }
+    (t1, t0)
+}
+
 pub fn high_bits(r: i32, gamma2: i32, q: i32) -> i32 {
     decompose(r, gamma2, q).0
 }
@@ -165,6 +194,17 @@ mod tests {
             let (r1, r0) = decompose(r, gamma2, q);
             let reconstructed = ((r1 as i64) * (alpha as i64) + r0 as i64).rem_euclid(q as i64);
             assert_eq!(reconstructed, (r as i64).rem_euclid(q as i64));
+        }
+    }
+
+    #[test]
+    fn power2round_reconstructs_r_and_bounds_r0() {
+        let q = 8380417;
+        for r in [0, 1, q - 1, 4096, 8191, 8192, 8193, 4_000_000] {
+            let (r1, r0) = power2round(r, q);
+            let reconstructed = ((r1 as i64) * (1i64 << 13) + r0 as i64).rem_euclid(q as i64);
+            assert_eq!(reconstructed, (r as i64).rem_euclid(q as i64), "r={r}");
+            assert!((-4096..=4096).contains(&r0), "r0={r0} out of range for r={r}");
         }
     }
 
