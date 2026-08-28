@@ -130,8 +130,8 @@ pub fn use_hint_vec(h: &Hint, r: &[Poly], gamma2: i32, q: i32) -> Vec<Poly> {
         .zip(r.iter())
         .map(|(hp, rp)| {
             let mut out = Poly::zero();
-            for i in 0..N {
-                out.coeffs[i] = use_hint(hp[i], rp.coeffs[i], gamma2, q);
+            for ((o, &h_bit), &r_coeff) in out.coeffs.iter_mut().zip(hp.iter()).zip(rp.coeffs.iter()) {
+                *o = use_hint(h_bit, r_coeff, gamma2, q);
             }
             out
         })

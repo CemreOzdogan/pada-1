@@ -1,4 +1,4 @@
-﻿//! Dilithium-shaped ML-DSA orchestration, FIPS 204-exact: keygen (Algorithm 6) / sign
+//! Dilithium-shaped ML-DSA orchestration, FIPS 204-exact: keygen (Algorithm 6) / sign
 //! (Algorithm 7, full Fiat-Shamir-with-aborts, hedged by default) / verify (Algorithm 8), over
 //! a runtime-chosen `GenericDsaParams`. Byte-exact against RustCrypto's `ml-dsa` and libcrux's
 //! `libcrux-ml-dsa` for the 3 standard parameter sets when their exact constants are supplied

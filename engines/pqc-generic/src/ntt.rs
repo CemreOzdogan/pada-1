@@ -148,8 +148,8 @@ pub fn inv_ntt(a: &mut [i64; N], table: &NttTable) {
 
 fn to_i64_array(p: &Poly) -> [i64; N] {
     let mut out = [0i64; N];
-    for i in 0..N {
-        out[i] = p.coeffs[i] as i64;
+    for (o, &c) in out.iter_mut().zip(p.coeffs.iter()) {
+        *o = c as i64;
     }
     out
 }
@@ -169,8 +169,8 @@ pub fn ntt_mul(a: &Poly, b: &Poly, table: &NttTable) -> Poly {
     inv_ntt(&mut cv, table);
 
     let mut out = Poly::zero();
-    for i in 0..N {
-        out.coeffs[i] = cv[i] as i32;
+    for (o, &c) in out.coeffs.iter_mut().zip(cv.iter()) {
+        *o = c as i32;
     }
     out
 }
@@ -195,8 +195,8 @@ pub fn ntt_mul_a(a_hat: &Poly, b_normal: &Poly, table: &NttTable) -> Poly {
     inv_ntt(&mut cv, table);
 
     let mut out = Poly::zero();
-    for i in 0..N {
-        out.coeffs[i] = cv[i] as i32;
+    for (o, &c) in out.coeffs.iter_mut().zip(cv.iter()) {
+        *o = c as i32;
     }
     out
 }

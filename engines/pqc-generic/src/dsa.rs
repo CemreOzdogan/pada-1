@@ -218,9 +218,10 @@ mod tests {
             // decoded, if to garbage), the real position-list encoding has structural validity
             // constraints (monotonic cuts, in-bounds indices) — so tampering can legitimately
             // produce a decode Err, not just an Ok(false). Both count as "rejected".
-            match verify(params, &kp.pk_bytes, msg, &bad_sig) {
-                Ok(valid) => assert!(!valid, "tampered signature should not verify"),
-                Err(_) => {} // malformed-signature decode error is also a correct rejection
+            // A decode Err also counts as "rejected" (see comment above), so only the Ok case
+            // needs checking.
+            if let Ok(valid) = verify(params, &kp.pk_bytes, msg, &bad_sig) {
+                assert!(!valid, "tampered signature should not verify");
             }
         }
     }
